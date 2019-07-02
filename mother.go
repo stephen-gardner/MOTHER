@@ -1,9 +1,12 @@
 package main
 
 import (
+	"database/sql"
 	"fmt"
 	"log"
 	"os"
+	"strings"
+	"time"
 
 	"github.com/nlopes/slack"
 )
@@ -16,63 +19,125 @@ type (
 	}
 
 	mother struct {
+		rtm        *slack.RTM
+		chanID     string
+		members    []string
 		convos     map[string]conversation
 		online     bool
 		lastUpdate int64
 	}
 )
 
-func main() {
-	openConnection("./mother.db", "CKL5EHAH0") // TODO: Get channel id for prefix
-	defer db.Close()
-
-	api := slack.New(
-		"",
+func newMother(token, name, chanID string) *mother {
+	api := slack.New(token,
 		slack.OptionDebug(true),
-		slack.OptionLog(log.New(os.Stdout, "slack-bot: ", log.Lshortfile|log.LstdFlags)),
+		slack.OptionLog(log.New(os.Stdout, name+": ", log.Lshortfile|log.LstdFlags)),
 	)
-
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
 
-	for msg := range rtm.IncomingEvents {
-		fmt.Print("Event Received: ")
-		switch ev := msg.Data.(type) {
-		case *slack.HelloEvent:
-			// Ignore hello
-
-		case *slack.ConnectedEvent:
-			fmt.Println("Infos:", ev.Info)
-			fmt.Println("Connection counter:", ev.ConnectionCount)
-			// Replace C2147483705 with your Channel ID
-			rtm.SendMessage(rtm.NewOutgoingMessage("Hello world", "C2147483705"))
-
-		case *slack.MessageEvent:
-			fmt.Printf("Message: %v\n", ev)
-
-		case *slack.PresenceChangeEvent:
-			fmt.Printf("Presence Change: %v\n", ev)
-
-		case *slack.LatencyReport:
-			fmt.Printf("Current latency: %v\n", ev.Value)
-
-		case *slack.RTMError:
-			fmt.Printf("Error: %s\n", ev.Error())
-
-		case *slack.InvalidAuthEvent:
-			fmt.Printf("Invalid credentials")
-			return
-
-		default:
-
-			// Ignore other events..
-			// fmt.Printf("Unexpected: %v\n", msg.Data)
-		}
-	}
+	mom := &mother{rtm: rtm, chanID: chanID, online: true, lastUpdate: time.Now().Unix()}
+	mom.members = []string{}
+	mom.convos = make(map[string]conversation)
+	return mom
 }
 
-func panicOnErr(err error) {
-	if err != nil {
-		panic(err)
+func (mom *mother) hasMember(userID string) bool {
+	for _, member := range mom.members {
+		if userID == member {
+			return true
+		}
 	}
+	return false
+}
+
+func (mom *mother) updateMembers() {
+	params := slack.GetUsersInConversationParameters{ChannelID: mom.chanID, Cursor: "", Limit: 0}
+	members, _, err := mom.rtm.GetUsersInConversation(&params)
+	if err != nil {
+		log.Println(err)
+		return
+	}
+	mom.members = members
+}
+
+func (mom *mother) lookupLogs(id string, isUser bool) ([]logEntry, error) {
+	var query string
+
+	if isUser {
+		query = fmt.Sprintf(lookupLogsUser, mom.chanID, mom.chanID)
+		id = "%" + id + "%"
+	} else {
+		query = fmt.Sprintf(lookupLogsThread, mom.chanID)
+	}
+
+	stmt, err := db.Prepare(query)
+	if err != nil {
+		return nil, err
+	}
+	defer stmt.Close()
+	result, err := stmt.Query(id)
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	logs := make([]logEntry, 0)
+	for result.Next() {
+		var entry logEntry
+
+		err = result.Scan(&entry.userID, &entry.msg, &entry.timestamp, &entry.original)
+		if err != nil {
+			return nil, err
+		}
+		logs = append(logs, entry)
+	}
+	return logs, nil
+}
+
+func (mom *mother) lookupThreads(userID string, page int) ([]threadInfo, error) {
+	var (
+		query  string
+		stmt   *sql.Stmt
+		result *sql.Rows
+		err    error
+	)
+
+	if userID != "" {
+		query = fmt.Sprintf(lookupThreadsUser, mom.chanID)
+		stmt, err = db.Prepare(query)
+		if err != nil {
+			return nil, err
+		}
+		defer stmt.Close()
+		result, err = stmt.Query("%"+userID+"%", 10, 10*(page-1))
+	} else {
+		query = fmt.Sprintf(lookupThreads, mom.chanID)
+		stmt, err = db.Prepare(query)
+		if err != nil {
+			return nil, err
+		}
+		defer stmt.Close()
+		result, err = stmt.Query(10, 10*(page-1))
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer result.Close()
+
+	threads := make([]threadInfo, 0)
+	for result.Next() {
+		var (
+			info    threadInfo
+			userIDs string
+		)
+
+		err = result.Scan(&info.threadID, &userIDs, &info.timestamp)
+		if err != nil {
+			return nil, err
+		}
+		info.userIDs = strings.Split(userIDs, ",")
+		threads = append(threads, info)
+	}
+	return threads, nil
 }
