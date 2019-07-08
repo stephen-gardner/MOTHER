@@ -4,7 +4,6 @@ import (
 	"database/sql"
 	"fmt"
 	"log"
-	"sort"
 	"strings"
 	"time"
 
@@ -32,22 +31,6 @@ type (
 	}
 )
 
-func newConversation(mom *mother, dmID, threadID string, userIDs []string) *conversation {
-	sort.Strings(userIDs)
-	conv := conversation{
-		mom:      mom,
-		dmID:     dmID,
-		threadID: threadID,
-		userIDs:  userIDs,
-	}
-	conv.logs = make(map[string]logEntry)
-	conv.convIndex = make(map[string]string)
-	conv.directIndex = make(map[string]string)
-	conv.editedLogs = make([]logEntry, 0)
-	conv.update()
-	return &conv
-}
-
 func (conv *conversation) addLog(directTimestamp, convTimestamp string, log logEntry) {
 	if prev, present := conv.logs[directTimestamp]; present {
 		conv.editedLogs = append(conv.editedLogs, prev)
@@ -70,16 +53,25 @@ func (conv *conversation) hasLog(timestamp string) bool {
 	return present
 }
 
+func (conv *conversation) postMessageToThread(msg string) (string, error) {
+	return conv.mom.postMessage(conv.mom.chanID, msg, conv.threadID)
+}
+
+func (conv *conversation) postMessageToDM(msg string) (string, error) {
+	return conv.mom.postMessage(conv.dmID, msg, "")
+}
+
 func (conv *conversation) sendMessageToThread(msg string) {
-	rtm := conv.mom.rtm
-	out := rtm.NewOutgoingMessage(msg, conv.mom.chanID, slack.RTMsgOptionTS(conv.threadID))
-	rtm.SendMessage(out)
+	out := conv.mom.rtm.NewOutgoingMessage(
+		msg,
+		conv.dmID,
+		slack.RTMsgOptionTS(conv.threadID),
+	)
+	conv.mom.rtm.SendMessage(out)
 }
 
 func (conv *conversation) sendMessageToDM(msg string) {
-	rtm := conv.mom.rtm
-	out := rtm.NewOutgoingMessage(msg, conv.dmID)
-	rtm.SendMessage(out)
+	conv.mom.rtm.SendMessage(conv.mom.rtm.NewOutgoingMessage(msg, conv.dmID))
 }
 
 func (conv *conversation) sendExpirationNotice() {
@@ -102,15 +94,10 @@ func (conv *conversation) setReaction(timestamp, emoji string, isDirect, removed
 		msgRef = slack.NewRefToMessage(conv.dmID, conv.convIndex[timestamp])
 	}
 
-	var err error
-
 	if removed {
-		err = conv.mom.rtm.RemoveReaction(emoji, msgRef)
+		_ = conv.mom.rtm.RemoveReaction(emoji, msgRef)
 	} else {
-		err = conv.mom.rtm.AddReaction(emoji, msgRef)
-	}
-	if err != nil {
-		log.Println(err)
+		_ = conv.mom.rtm.AddReaction(emoji, msgRef)
 	}
 
 	conv.update()
@@ -138,7 +125,11 @@ func (conv *conversation) updateMessage(userID, timestamp, msg string, isDirect 
 	}
 
 	tagged := fmt.Sprintf(msgCopyFmt, userID, msg)
-	_, _, _, err := conv.mom.rtm.UpdateMessage(chanID, timestamp, slack.MsgOptionText(tagged, false))
+	_, _, _, err := conv.mom.rtm.UpdateMessage(
+		chanID,
+		timestamp,
+		slack.MsgOptionText(tagged, false),
+	)
 	if err != nil {
 		log.Println(err)
 		return
@@ -186,6 +177,13 @@ func (conv *conversation) save() error {
 			return err
 		}
 		delete(conv.logs, key)
+	}
+	for _, entry := range conv.editedLogs {
+		_, err = stmt.Exec(entry.userID, conv.threadID, entry.msg, entry.timestamp, entry.original)
+		if err != nil {
+			return err
+		}
+		conv.editedLogs = conv.editedLogs[1:]
 	}
 	return nil
 }

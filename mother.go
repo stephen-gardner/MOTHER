@@ -25,8 +25,8 @@ type (
 		name       string
 		rtm        *slack.RTM
 		chanID     string
-		members    []string
 		convos     map[string]*conversation
+		chanInfo   map[string]*slack.Channel
 		online     bool
 		lastUpdate int64
 	}
@@ -47,8 +47,8 @@ func newMother(token, name, chanID string) *mother {
 		online:     true,
 		lastUpdate: time.Now().Unix(),
 	}
-	mom.members = make([]string, 0)
 	mom.convos = make(map[string]*conversation)
+	mom.chanInfo = make(map[string]*slack.Channel)
 	return mom
 }
 
@@ -69,11 +69,30 @@ func (mom *mother) addConversation(conv *conversation) {
 	}
 }
 
+func (mom *mother) newConversation(dmID, threadID string, userIDs []string) *conversation {
+	sort.Strings(userIDs)
+	conv := conversation{
+		mom:      mom,
+		dmID:     dmID,
+		threadID: threadID,
+		userIDs:  userIDs,
+	}
+	conv.logs = make(map[string]logEntry)
+	conv.convIndex = make(map[string]string)
+	conv.directIndex = make(map[string]string)
+	conv.editedLogs = make([]logEntry, 0)
+	conv.update()
+	return &conv
+}
+
 func (mom *mother) startConversation(userIDs []string, dmID string, notifyUser bool) (*conversation, error) {
 	var sb strings.Builder
 
 	first := true
 	for _, ID := range userIDs {
+		if ID == mom.rtm.GetInfo().User.ID {
+			continue
+		}
 		if first {
 			first = false
 		} else {
@@ -82,12 +101,12 @@ func (mom *mother) startConversation(userIDs []string, dmID string, notifyUser b
 		sb.WriteString(fmt.Sprintf("<@%s>", ID))
 	}
 	notice := fmt.Sprintf(sessionNotice, sb.String())
-	timestamp, err := mom.sendMessageToChannel(notice)
+	timestamp, err := mom.postMessage(mom.chanID, notice, "")
 	if err != nil {
 		return nil, err
 	}
 
-	conv := newConversation(mom, dmID, timestamp, userIDs)
+	conv := mom.newConversation(dmID, timestamp, userIDs)
 	mom.addConversation(conv)
 	if notifyUser {
 		conv.sendMessageToDM(sessionStart)
@@ -107,6 +126,7 @@ func (mom *mother) reapConversations(sessionTimeout int64) {
 			continue
 		}
 		delete(mom.convos, key)
+		delete(mom.chanInfo, key)
 		conv.sendExpirationNotice()
 	}
 }
@@ -179,9 +199,41 @@ func (mom *mother) loadConversation(threadID string) (*conversation, error) {
 		return nil, err
 	}
 
-	conv := newConversation(mom, channel.ID, threadID, users)
+	conv := mom.newConversation(channel.ID, threadID, users)
 	conv.resume()
 	return conv, nil
+}
+
+func (mom *mother) getChannelInfo(chanID string) *slack.Channel {
+	chanInfo, present := mom.chanInfo[chanID]
+	if present {
+		return chanInfo
+	}
+	chanInfo, err := mom.rtm.GetConversationInfo(chanID, false)
+	if err != nil {
+		log.Println(err)
+		if !present {
+			return nil
+		}
+	}
+
+	params := slack.GetUsersInConversationParameters{
+		ChannelID: chanID,
+		Cursor:    "",
+		Limit:     0,
+	}
+	members, _, err := mom.rtm.GetUsersInConversation(&params)
+	if err != nil {
+		log.Println(err)
+		if len(chanInfo.Members) == 0 {
+			return nil
+		}
+	} else {
+		chanInfo.Members = members
+	}
+
+	mom.chanInfo[chanID] = chanInfo
+	return chanInfo
 }
 
 func (mom *mother) getMessageLink(timestamp string) string {
@@ -197,22 +249,15 @@ func (mom *mother) getMessageLink(timestamp string) string {
 }
 
 func (mom *mother) hasMember(userID string) bool {
-	for _, member := range mom.members {
-		if userID == member {
-			return true
+	chanInfo := mom.getChannelInfo(mom.chanID)
+	if chanInfo != nil {
+		for _, member := range chanInfo.Members {
+			if userID == member {
+				return true
+			}
 		}
 	}
 	return false
-}
-
-func (mom *mother) updateMembers() {
-	params := slack.GetUsersInConversationParameters{ChannelID: mom.chanID, Cursor: "", Limit: 0}
-	members, _, err := mom.rtm.GetUsersInConversation(&params)
-	if err != nil {
-		log.Println(err)
-		return
-	}
-	mom.members = members
 }
 
 func (mom *mother) lookupLogs(id string, isUser bool) ([]logEntry, error) {
@@ -296,13 +341,31 @@ func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
 	return threads, nil
 }
 
-func (mom *mother) sendMessageToChannel(msg string) (string, error) {
-	rtm := mom.rtm
-	_, timestamp, err := rtm.PostMessage(mom.chanID, slack.MsgOptionText(msg, false), slack.MsgOptionPost())
-	if err != nil {
-		return "", err
+// If we get errors too often, we may have to develop more robust message flow
+func (mom *mother) postMessage(chanID, msg, threadID string) (string, error) {
+	var err error
+	for x := 0; x < 5; x++ {
+		_, timestamp, err := mom.rtm.PostMessage(
+			chanID,
+			slack.MsgOptionText(msg, false),
+			slack.MsgOptionTS(threadID),
+		)
+		if err == nil {
+			return timestamp, nil
+		} else if strings.HasPrefix(err.Error(), "slack rate limit exceeded") {
+			time.Sleep(2 * time.Second)
+		} else {
+			break
+		}
 	}
-	return timestamp, nil
+	log.Println(err)
+	out := mom.rtm.NewOutgoingMessage(
+		highVolumeError,
+		mom.chanID,
+		slack.RTMsgOptionTS(threadID),
+	)
+	mom.rtm.SendMessage(out)
+	return "", err
 }
 
 func (mom *mother) shutdown() {
