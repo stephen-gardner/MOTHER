@@ -8,9 +8,14 @@ import (
 )
 
 const (
+	blacklistedUser            = ">_*User <@%s> can not start conversations.*_"
 	highVolumeError            = ">_*We are currently experiencing an unusually high volume of requests. Please try again in a moment.*_"
 	inConvChannel              = ">_*Users in `#%s` can not start conversations. Send `!help` for a list of available commands.*_"
+	listBlacklisted            = "*Blacklisted users:* %s"
 	msgCopyFmt                 = "*<@%s>:* %s"
+	reactFailure               = "x"
+	reactSuccess               = "white_check_mark"
+	reactUnknown               = "question"
 	sessionContextSwitchedFrom = ">_*Session context switched from [%s].*_"
 	sessionContextSwitchedTo   = ">_*Session context switched to [%s].*_"
 	sessionExpiredConv         = ">_*Session [%s] has expired.*_\n>Edits/reactions to previous messages will no longer be reflected in communications."
@@ -22,7 +27,8 @@ const (
 )
 
 func main() {
-	if err := openConnection("./mother.db", "CKL5EHAH0"); err != nil { // TODO: Get channel id for prefix
+
+	if err := openConnection("./mother.db", "CKL5EHAH0"); err != nil {
 		log.Fatal(err)
 	}
 	defer db.Close()
@@ -34,7 +40,7 @@ func main() {
 		switch ev := msg.Data.(type) {
 
 		case *slack.MessageEvent:
-			if ev.User == mom.rtm.GetInfo().User.ID {
+			if ev.User == mom.rtm.GetInfo().User.ID || mom.isBlacklisted(ev.User) || len(ev.Text) == 0 {
 				break
 			}
 			chanInfo := mom.getChannelInfo(ev.Channel)
@@ -42,7 +48,7 @@ func main() {
 				break
 			}
 
-			if (ev.SubType == "message_changed" && ev.SubMessage.User != mom.rtm.GetInfo().User.ID) {
+			if ev.SubType == "message_changed" && ev.SubMessage.User != mom.rtm.GetInfo().User.ID {
 				mom.handleMessageChangedEvent(ev, chanInfo)
 			} else if ev.Channel == mom.chanID {
 				mom.handleChannelMessageEvent(ev)
@@ -69,7 +75,7 @@ func main() {
 			return
 
 		case *slack.RateLimitedError:
-			log.Println("Warning: Hitting RTM rate limit")
+			log.Println("Hitting RTM rate limit")
 			time.Sleep(ev.RetryAfter * time.Second)
 
 		default:

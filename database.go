@@ -8,6 +8,9 @@ import (
 )
 
 const (
+	createBlacklistTable = "CREATE TABLE IF NOT EXISTS %s_blacklist" +
+		" (user_id TEXT PRIMARY KEY," +
+		" timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
 	createMessagesTable = "CREATE TABLE IF NOT EXISTS %s_messages" +
 		" (id INTEGER PRIMARY KEY AUTOINCREMENT," +
 		" user_id TEXT," +
@@ -19,6 +22,11 @@ const (
 		" (thread_id TEXT PRIMARY KEY," +
 		" user_ids TEXT," +
 		" timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
+	deleteBlacklisted = "DELETE FROM %s_blacklist" +
+		" WHERE user_id = ?;"
+	insertBlacklisted = "INSERT INTO %s_blacklist" +
+		" (user_id)" +
+		" VALUES(?);"
 	findThreadIndex = "SELECT user_ids FROM %s_index" +
 		" WHERE thread_id = ?;"
 	insertMessage = "INSERT INTO %s_messages" +
@@ -27,6 +35,8 @@ const (
 	insertThreadIndex = "INSERT OR REPLACE INTO %s_index" +
 		" (thread_id, user_ids)" +
 		" VALUES (?, ?);"
+	lookupBlacklisted = "SELECT user_id FROM %s_blacklist" +
+		" ORDER BY timestamp DESC;"
 	lookupLogsThread = "SELECT user_id, content, timestamp, original FROM %s_messages" +
 		" WHERE thread_id = ?" +
 		" ORDER BY timestamp ASC, id DESC;"
@@ -46,7 +56,7 @@ const (
 
 var db *sql.DB
 
-func openConnection(dbPath, prefix string) error {
+func openConnection(dbPath, chanID string) error {
 	var (
 		query string
 		stmt  *sql.Stmt
@@ -58,7 +68,7 @@ func openConnection(dbPath, prefix string) error {
 		return err
 	}
 
-	query = fmt.Sprintf(createMessagesTable, prefix)
+	query = fmt.Sprintf(createMessagesTable, chanID)
 	stmt, err = db.Prepare(query)
 	if err != nil {
 		return err
@@ -68,7 +78,16 @@ func openConnection(dbPath, prefix string) error {
 		return err
 	}
 
-	query = fmt.Sprintf(createThreadIndexTable, prefix)
+	query = fmt.Sprintf(createThreadIndexTable, chanID)
+	stmt, err = db.Prepare(query)
+	if err != nil {
+		return err
+	}
+	if _, err = stmt.Exec(); err != nil {
+		return err
+	}
+
+	query = fmt.Sprintf(createBlacklistTable, chanID)
 	stmt, err = db.Prepare(query)
 	if err != nil {
 		return err

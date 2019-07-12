@@ -64,7 +64,7 @@ func (conv *conversation) postMessageToDM(msg string) (string, error) {
 func (conv *conversation) sendMessageToThread(msg string) {
 	out := conv.mom.rtm.NewOutgoingMessage(
 		msg,
-		conv.dmID,
+		conv.mom.chanID,
 		slack.RTMsgOptionTS(conv.threadID),
 	)
 	conv.mom.rtm.SendMessage(out)

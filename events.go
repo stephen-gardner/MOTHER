@@ -26,22 +26,30 @@ func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 			return
 		}
 	}
+
+	if ev.Text[0] == '!' && mom.hasMember(ev.User) {
+		mom.runCommand(ev)
+	}
 }
 
 func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *slack.Channel) {
+	rtm := mom.rtm
 	member := false
 	for _, userID := range chanInfo.Members {
+		if mom.isBlacklisted(userID) {
+			rtm.SendMessage(rtm.NewOutgoingMessage(fmt.Sprintf(blacklistedUser, userID), ev.Channel))
+			return
+		}
 		if mom.hasMember(userID) {
 			member = true
 		}
 	}
 	if member {
 		if ev.Text[0] == '!' {
-
+			mom.runCommand(ev)
 		} else {
 			chanName := mom.getChannelInfo(mom.chanID).Name
-			out := mom.rtm.NewOutgoingMessage(fmt.Sprintf(inConvChannel, chanName), ev.Channel)
-			mom.rtm.SendMessage(out)
+			rtm.SendMessage(rtm.NewOutgoingMessage(fmt.Sprintf(inConvChannel, chanName), ev.Channel))
 		}
 		return
 	}
@@ -56,7 +64,7 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 		conv, err = mom.startConversation(chanInfo.Members, ev.Channel, true)
 		if err != nil {
 			log.Println(err)
-			mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(highVolumeError, ev.Channel))
+			rtm.SendMessage(rtm.NewOutgoingMessage(highVolumeError, ev.Channel))
 			return
 		}
 	}
@@ -88,7 +96,7 @@ func (mom *mother) handleMessageChangedEvent(ev *slack.MessageEvent, chanInfo *s
 }
 
 func (mom *mother) handleUserTypingEvent(ev *slack.UserTypingEvent) {
-	if ev.User == mom.rtm.GetInfo().User.ID || mom.hasMember(ev.User) {
+	if ev.User == mom.rtm.GetInfo().User.ID || mom.hasMember(ev.User) || mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo := mom.getChannelInfo(ev.Channel)
@@ -101,7 +109,7 @@ func (mom *mother) handleUserTypingEvent(ev *slack.UserTypingEvent) {
 }
 
 func (mom *mother) handleReactionAddedEvent(ev *slack.ReactionAddedEvent) {
-	if ev.User == mom.rtm.GetInfo().User.ID {
+	if ev.User == mom.rtm.GetInfo().User.ID || mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo := mom.getChannelInfo(ev.Item.Channel)
@@ -115,7 +123,7 @@ func (mom *mother) handleReactionAddedEvent(ev *slack.ReactionAddedEvent) {
 }
 
 func (mom *mother) handleReactionRemovedEvent(ev *slack.ReactionRemovedEvent) {
-	if ev.User == mom.rtm.GetInfo().User.ID {
+	if ev.User == mom.rtm.GetInfo().User.ID || mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo := mom.getChannelInfo(ev.Item.Channel)
