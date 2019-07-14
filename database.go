@@ -56,20 +56,10 @@ const (
 
 var db *sql.DB
 
-func openConnection(dbPath, chanID string) error {
-	var (
-		query string
-		stmt  *sql.Stmt
-		err   error
-	)
+func initTables(chanID string) error {
 
-	db, err = sql.Open("sqlite3", dbPath)
-	if err != nil {
-		return err
-	}
-
-	query = fmt.Sprintf(createMessagesTable, chanID)
-	stmt, err = db.Prepare(query)
+	query := fmt.Sprintf(createMessagesTable, chanID)
+	stmt, err := db.Prepare(query)
 	if err != nil {
 		return err
 	}
@@ -96,5 +86,15 @@ func openConnection(dbPath, chanID string) error {
 		return err
 	}
 
+	return nil
+}
+
+func openConnection(dbPath string) error {
+	var err error
+
+	db, err = sql.Open("sqlite3", dbPath)
+	if err != nil {
+		return err
+	}
 	return nil
 }

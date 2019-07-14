@@ -23,8 +23,8 @@ type (
 
 	mother struct {
 		name       string
-		rtm        *slack.RTM
 		chanID     string
+		rtm        *slack.RTM
 		convos     map[string]*conversation
 		chanInfo   map[string]*slack.Channel
 		users      map[string]*slack.User
@@ -35,6 +35,10 @@ type (
 )
 
 func newMother(token, name, chanID string) *mother {
+	if err := initTables(chanID); err != nil {
+		log.Fatal(err)
+	}
+
 	api := slack.New(token,
 		slack.OptionDebug(true),
 		slack.OptionLog(log.New(os.Stdout, name+": ", log.Lshortfile|log.LstdFlags)),
@@ -44,8 +48,8 @@ func newMother(token, name, chanID string) *mother {
 
 	mom := &mother{
 		name:       name,
-		rtm:        rtm,
 		chanID:     chanID,
+		rtm:        rtm,
 		online:     true,
 		lastUpdate: time.Now().Unix(),
 	}
@@ -336,7 +340,9 @@ func (mom *mother) hasMember(userID string) bool {
 	chanInfo := mom.getChannelInfo(mom.chanID)
 	if chanInfo != nil {
 		for _, member := range chanInfo.Members {
-			if userID == member {
+			if member == mom.rtm.GetInfo().User.ID {
+				continue
+			} else if userID == member {
 				return true
 			}
 		}
@@ -487,5 +493,6 @@ func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
 func (mom *mother) shutdown() {
 	mom.online = false
 	mom.rtm.Disconnect()
+	mom.reapConversations(0)
 	log.Println(mom.name + " disconnected")
 }

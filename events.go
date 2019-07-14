@@ -27,7 +27,7 @@ func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 		}
 	}
 
-	if ev.Text[0] == '!' && mom.hasMember(ev.User) {
+	if mom.hasMember(ev.User) && len(ev.Text) > 0 && ev.Text[0] == '!' {
 		mom.runCommand(ev)
 	}
 }
@@ -45,7 +45,7 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 		}
 	}
 	if member {
-		if ev.Text[0] == '!' {
+		if mom.hasMember(ev.User) && len(ev.Text) > 0 && ev.Text[0] == '!' {
 			mom.runCommand(ev)
 		} else {
 			chanName := mom.getChannelInfo(mom.chanID).Name

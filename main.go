@@ -26,19 +26,29 @@ const (
 	sessionStart               = ">_*A dialogue has been started with the RA team. An RA will reach out to you shortly.*_"
 )
 
-func main() {
+type botConfig struct {
+	name   string
+	token  string
+	chanID string
+}
 
-	if err := openConnection("./mother.db", "CKL5EHAH0"); err != nil {
-		log.Fatal(err)
-	}
-	defer db.Close()
+type botEvent struct {
+	mom *mother
+	msg slack.RTMEvent
+}
 
-	mom := newMother("",
-		"test_server", "CKL5EHAH0")
+type scrubEvent struct {
+	Type string
+}
 
-	for msg := range mom.rtm.IncomingEvents {
-		switch ev := msg.Data.(type) {
+func handleEvents(events chan botEvent) {
+	for bot := range events {
+		mom := bot.mom
+		if !mom.online {
+			continue
+		}
 
+		switch ev := bot.msg.Data.(type) {
 		case *slack.MessageEvent:
 			if ev.User == mom.rtm.GetInfo().User.ID || mom.isBlacklisted(ev.User) || len(ev.Text) == 0 {
 				break
@@ -78,10 +88,63 @@ func main() {
 			log.Println("Hitting RTM rate limit")
 			time.Sleep(ev.RetryAfter * time.Second)
 
-		default:
+		case *scrubEvent:
+			mom.reapConversations(30)
 
+		default:
 			// Ignore other events..
-			// fmt.Printf("Unexpected: %v\n", msg.Data)
 		}
 	}
+}
+
+func main() {
+	if err := openConnection("./mother.db"); err != nil {
+		log.Fatal(err)
+	}
+	defer db.Close()
+
+	bc := []botConfig{
+		{
+			name:   "MOTHER",
+			token:  "",
+			chanID: "CKL5EHAH0",
+		},
+		{
+			name:   "Percy",
+			token:  "",
+			chanID: "GL73S064R",
+		},
+	}
+
+	events := make(chan botEvent)
+	defer close(events)
+
+	mothers := make([]*mother, len(bc))
+	for i, config := range bc {
+		mothers[i] = newMother(config.token, config.name, config.chanID)
+
+		go func(mom *mother) {
+			for msg := range mom.rtm.IncomingEvents {
+				events <- botEvent{
+					mom: mom,
+					msg: msg,
+				}
+			}
+		}(mothers[i])
+
+		go func(mom *mother) {
+			for {
+				time.Sleep(time.Minute)
+				events <- botEvent{
+					mom: mom,
+					msg: slack.RTMEvent{
+						Type: "scrub",
+						Data: &scrubEvent{"scrub"},
+					},
+				}
+			}
+		}(mothers[i])
+	}
+
+	handleEvents(events)
 }
