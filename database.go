@@ -24,7 +24,7 @@ const (
 		" timestamp DATETIME DEFAULT CURRENT_TIMESTAMP);"
 	deleteBlacklisted = "DELETE FROM %s_blacklist" +
 		" WHERE user_id = ?;"
-	insertBlacklisted = "INSERT INTO %s_blacklist" +
+	insertBlacklisted = "INSERT OR REPLACE INTO %s_blacklist" +
 		" (user_id)" +
 		" VALUES(?);"
 	findThreadIndex = "SELECT user_ids FROM %s_index" +
@@ -57,7 +57,6 @@ const (
 var db *sql.DB
 
 func initTables(chanID string) error {
-
 	query := fmt.Sprintf(createMessagesTable, chanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {

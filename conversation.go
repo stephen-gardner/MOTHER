@@ -54,7 +54,7 @@ func (conv *conversation) hasLog(timestamp string) bool {
 }
 
 func (conv *conversation) postMessageToThread(msg string) (string, error) {
-	return conv.mom.postMessage(conv.mom.chanID, msg, conv.threadID)
+	return conv.mom.postMessage(conv.mom.config.ChanID, msg, conv.threadID)
 }
 
 func (conv *conversation) postMessageToDM(msg string) (string, error) {
@@ -64,7 +64,7 @@ func (conv *conversation) postMessageToDM(msg string) (string, error) {
 func (conv *conversation) sendMessageToThread(msg string) {
 	out := conv.mom.rtm.NewOutgoingMessage(
 		msg,
-		conv.mom.chanID,
+		conv.mom.config.ChanID,
 		slack.RTMsgOptionTS(conv.threadID),
 	)
 	conv.mom.rtm.SendMessage(out)
@@ -75,8 +75,8 @@ func (conv *conversation) sendMessageToDM(msg string) {
 }
 
 func (conv *conversation) sendExpirationNotice() {
-	conv.sendMessageToDM(sessionExpiredDirect)
-	conv.sendMessageToThread(fmt.Sprintf(sessionExpiredConv, conv.threadID))
+	conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
+	conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.threadID))
 }
 
 func (conv *conversation) setReaction(timestamp, emoji string, isDirect, removed bool) {
@@ -86,7 +86,7 @@ func (conv *conversation) setReaction(timestamp, emoji string, isDirect, removed
 		if _, present := conv.directIndex[timestamp]; !present {
 			return
 		}
-		msgRef = slack.NewRefToMessage(conv.mom.chanID, conv.directIndex[timestamp])
+		msgRef = slack.NewRefToMessage(conv.mom.config.ChanID, conv.directIndex[timestamp])
 	} else {
 		if _, present := conv.convIndex[timestamp]; !present {
 			return
@@ -113,7 +113,7 @@ func (conv *conversation) updateMessage(userID, timestamp, msg string, isDirect 
 		convTimestamp = conv.directIndex[timestamp]
 		directTimestamp = timestamp
 		timestamp = convTimestamp
-		chanID = conv.mom.chanID
+		chanID = conv.mom.config.ChanID
 	} else {
 		if _, present := conv.convIndex[timestamp]; !present {
 			return
@@ -124,7 +124,7 @@ func (conv *conversation) updateMessage(userID, timestamp, msg string, isDirect 
 		chanID = conv.dmID
 	}
 
-	tagged := fmt.Sprintf(msgCopyFmt, userID, msg)
+	tagged := fmt.Sprintf(conv.mom.getMsg("msgCopyFmt"), userID, msg)
 	_, _, _, err := conv.mom.rtm.UpdateMessage(
 		chanID,
 		timestamp,
@@ -144,8 +144,8 @@ func (conv *conversation) updateMessage(userID, timestamp, msg string, isDirect 
 }
 
 func (conv *conversation) resume() {
-	conv.sendMessageToThread(sessionResumeConv)
-	conv.sendMessageToDM(sessionResumeDirect)
+	conv.sendMessageToThread(conv.mom.getMsg("sessionResumeConv"))
+	conv.sendMessageToDM(conv.mom.getMsg("sessionResumeDirect"))
 	conv.mom.addConversation(conv)
 }
 
@@ -156,7 +156,7 @@ func (conv *conversation) save() error {
 		err   error
 	)
 
-	query = fmt.Sprintf(insertThreadIndex, conv.mom.chanID)
+	query = fmt.Sprintf(insertThreadIndex, conv.mom.config.ChanID)
 	stmt, err = db.Prepare(query)
 	if err != nil {
 		return err
@@ -166,7 +166,7 @@ func (conv *conversation) save() error {
 		return err
 	}
 
-	query = fmt.Sprintf(insertMessage, conv.mom.chanID)
+	query = fmt.Sprintf(insertMessage, conv.mom.config.ChanID)
 	stmt, err = db.Prepare(query)
 	if err != nil {
 		return err

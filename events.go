@@ -11,7 +11,7 @@ func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 	threadID := ev.ThreadTimestamp
 	if threadID != "" {
 		if conv := mom.findConversation(threadID, true); conv != nil {
-			msg := fmt.Sprintf(msgCopyFmt, ev.User, ev.Text)
+			msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
 			directTimestamp, err := conv.postMessageToDM(msg)
 			if err != nil {
 				return
@@ -27,7 +27,7 @@ func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 		}
 	}
 
-	if mom.hasMember(ev.User) && len(ev.Text) > 0 && ev.Text[0] == '!' {
+	if len(ev.Text) > 0 && ev.Text[0] == '!' {
 		mom.runCommand(ev)
 	}
 }
@@ -36,8 +36,11 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 	rtm := mom.rtm
 	member := false
 	for _, userID := range chanInfo.Members {
+		if userID == mom.rtm.GetInfo().User.ID {
+			continue
+		}
 		if mom.isBlacklisted(userID) {
-			rtm.SendMessage(rtm.NewOutgoingMessage(fmt.Sprintf(blacklistedUser, userID), ev.Channel))
+			rtm.SendMessage(rtm.NewOutgoingMessage(fmt.Sprintf(mom.getMsg("blacklistedUser"), userID), ev.Channel))
 			return
 		}
 		if mom.hasMember(userID) {
@@ -48,8 +51,8 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 		if mom.hasMember(ev.User) && len(ev.Text) > 0 && ev.Text[0] == '!' {
 			mom.runCommand(ev)
 		} else {
-			chanName := mom.getChannelInfo(mom.chanID).Name
-			rtm.SendMessage(rtm.NewOutgoingMessage(fmt.Sprintf(inConvChannel, chanName), ev.Channel))
+			chanName := mom.getChannelInfo(mom.config.ChanID).Name
+			rtm.SendMessage(rtm.NewOutgoingMessage(fmt.Sprintf(mom.getMsg("inConvChannel"), chanName), ev.Channel))
 		}
 		return
 	}
@@ -64,12 +67,12 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 		conv, err = mom.startConversation(chanInfo.Members, ev.Channel, true)
 		if err != nil {
 			log.Println(err)
-			rtm.SendMessage(rtm.NewOutgoingMessage(highVolumeError, ev.Channel))
+			rtm.SendMessage(rtm.NewOutgoingMessage(mom.getMsg("highVolumeError"), ev.Channel))
 			return
 		}
 	}
 
-	msg := fmt.Sprintf(msgCopyFmt, ev.User, ev.Text)
+	msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
 	convTimestamp, err := conv.postMessageToThread(msg)
 	if err != nil {
 		return
@@ -96,7 +99,7 @@ func (mom *mother) handleMessageChangedEvent(ev *slack.MessageEvent, chanInfo *s
 }
 
 func (mom *mother) handleUserTypingEvent(ev *slack.UserTypingEvent) {
-	if ev.User == mom.rtm.GetInfo().User.ID || mom.hasMember(ev.User) || mom.isBlacklisted(ev.User) {
+	if mom.hasMember(ev.User) || mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo := mom.getChannelInfo(ev.Channel)
@@ -104,12 +107,12 @@ func (mom *mother) handleUserTypingEvent(ev *slack.UserTypingEvent) {
 		return
 	}
 	if chanInfo.IsIM || chanInfo.IsMpIM {
-		mom.rtm.SendMessage(mom.rtm.NewTypingMessage(mom.chanID))
+		mom.rtm.SendMessage(mom.rtm.NewTypingMessage(mom.config.ChanID))
 	}
 }
 
 func (mom *mother) handleReactionAddedEvent(ev *slack.ReactionAddedEvent) {
-	if ev.User == mom.rtm.GetInfo().User.ID || mom.isBlacklisted(ev.User) {
+	if mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo := mom.getChannelInfo(ev.Item.Channel)
@@ -123,7 +126,7 @@ func (mom *mother) handleReactionAddedEvent(ev *slack.ReactionAddedEvent) {
 }
 
 func (mom *mother) handleReactionRemovedEvent(ev *slack.ReactionRemovedEvent) {
-	if ev.User == mom.rtm.GetInfo().User.ID || mom.isBlacklisted(ev.User) {
+	if mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo := mom.getChannelInfo(ev.Item.Channel)

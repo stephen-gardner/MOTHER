@@ -22,9 +22,9 @@ type (
 	}
 
 	mother struct {
-		name       string
-		chanID     string
+		config     botConfig
 		rtm        *slack.RTM
+		log        *log.Logger
 		convos     map[string]*conversation
 		chanInfo   map[string]*slack.Channel
 		users      map[string]*slack.User
@@ -34,21 +34,23 @@ type (
 	}
 )
 
-func newMother(token, name, chanID string) *mother {
-	if err := initTables(chanID); err != nil {
-		log.Fatal(err)
+func newMother(config botConfig) *mother {
+	logger := log.New(os.Stdout, config.Name+": ", log.Lshortfile|log.LstdFlags)
+
+	if err := initTables(config.ChanID); err != nil {
+		logger.Fatal(err)
 	}
 
-	api := slack.New(token,
+	api := slack.New(config.Token,
 		slack.OptionDebug(true),
-		slack.OptionLog(log.New(os.Stdout, name+": ", log.Lshortfile|log.LstdFlags)),
+		slack.OptionLog(logger),
 	)
 	rtm := api.NewRTM()
 	go rtm.ManageConnection()
 
 	mom := &mother{
-		name:       name,
-		chanID:     chanID,
+		config:     config,
+		log:        logger,
 		rtm:        rtm,
 		online:     true,
 		lastUpdate: time.Now().Unix(),
@@ -58,7 +60,7 @@ func newMother(token, name, chanID string) *mother {
 	mom.users = make(map[string]*slack.User)
 	mom.blacklist = make([]string, 0)
 
-	query := fmt.Sprintf(lookupBlacklisted, chanID)
+	query := fmt.Sprintf(lookupBlacklisted, config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
 		log.Fatal(err)
@@ -95,7 +97,7 @@ func (mom *mother) blacklistUser(userID string) bool {
 		return false
 	}
 
-	query := fmt.Sprintf(insertBlacklisted, mom.chanID)
+	query := fmt.Sprintf(insertBlacklisted, mom.config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
 		log.Println(err)
@@ -123,7 +125,7 @@ func (mom *mother) removeBlacklistedUser(userID string) bool {
 	if idx < 0 {
 		return false
 	}
-	query := fmt.Sprintf(deleteBlacklisted, mom.chanID)
+	query := fmt.Sprintf(deleteBlacklisted, mom.config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
 		log.Println(err)
@@ -147,9 +149,9 @@ func (mom *mother) addConversation(conv *conversation) {
 		var link string
 
 		link = mom.getMessageLink(conv.threadID)
-		prev.sendMessageToThread(fmt.Sprintf(sessionContextSwitchedTo, link))
+		prev.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedTo"), link))
 		link = mom.getMessageLink(prev.threadID)
-		conv.sendMessageToThread(fmt.Sprintf(sessionContextSwitchedFrom, link))
+		conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedFrom"), link))
 		if err := prev.save(); err != nil {
 			log.Println(err)
 			mom.convos[prev.threadID+strconv.FormatInt(prev.lastUpdate, 10)] = prev
@@ -188,8 +190,8 @@ func (mom *mother) startConversation(userIDs []string, dmID string, notifyUser b
 		}
 		sb.WriteString(fmt.Sprintf("<@%s>", ID))
 	}
-	notice := fmt.Sprintf(sessionNotice, sb.String())
-	timestamp, err := mom.postMessage(mom.chanID, notice, "")
+	notice := fmt.Sprintf(mom.getMsg("sessionNotice"), sb.String())
+	timestamp, err := mom.postMessage(mom.config.ChanID, notice, "")
 	if err != nil {
 		return nil, err
 	}
@@ -197,7 +199,7 @@ func (mom *mother) startConversation(userIDs []string, dmID string, notifyUser b
 	conv := mom.newConversation(dmID, timestamp, userIDs)
 	mom.addConversation(conv)
 	if notifyUser {
-		conv.sendMessageToDM(sessionStart)
+		conv.sendMessageToDM(mom.getMsg("sessionStart"))
 	}
 	return conv, nil
 }
@@ -251,7 +253,7 @@ func (mom *mother) findConversationByUsers(userIDs []string) *conversation {
 func (mom *mother) loadConversation(threadID string) (*conversation, error) {
 	var userIDs string
 
-	query := fmt.Sprintf(findThreadIndex, mom.chanID)
+	query := fmt.Sprintf(findThreadIndex, mom.config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
 		return nil, err
@@ -337,7 +339,7 @@ func (mom *mother) getUser(userID string) *slack.User {
 }
 
 func (mom *mother) hasMember(userID string) bool {
-	chanInfo := mom.getChannelInfo(mom.chanID)
+	chanInfo := mom.getChannelInfo(mom.config.ChanID)
 	if chanInfo != nil {
 		for _, member := range chanInfo.Members {
 			if member == mom.rtm.GetInfo().User.ID {
@@ -352,7 +354,7 @@ func (mom *mother) hasMember(userID string) bool {
 
 func (mom *mother) getMessageLink(timestamp string) string {
 	params := slack.PermalinkParameters{
-		Channel: mom.chanID,
+		Channel: mom.config.ChanID,
 		Ts:      timestamp,
 	}
 	link, err := mom.rtm.GetPermalink(&params)
@@ -388,7 +390,7 @@ func (mom *mother) runCommand(ev *slack.MessageEvent) {
 	ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
 	cmd, present := commands[cmdName]
 	if !present {
-		err := mom.rtm.AddReaction(reactUnknown, ref)
+		err := mom.rtm.AddReaction(mom.getMsg("reactUnknown"), ref)
 		if err != nil {
 			log.Println(err)
 		}
@@ -399,9 +401,9 @@ func (mom *mother) runCommand(ev *slack.MessageEvent) {
 
 	var reaction string
 	if success {
-		reaction = reactSuccess
+		reaction = mom.getMsg("reactSuccess")
 	} else {
-		reaction = reactFailure
+		reaction = mom.getMsg("reactFailure")
 	}
 	err := mom.rtm.AddReaction(reaction, ref)
 	if err != nil {
@@ -413,10 +415,10 @@ func (mom *mother) lookupLogs(id string, isUser bool) ([]logEntry, error) {
 	var query string
 
 	if isUser {
-		query = fmt.Sprintf(lookupLogsUser, mom.chanID, mom.chanID)
+		query = fmt.Sprintf(lookupLogsUser, mom.config.ChanID, mom.config.ChanID)
 		id = "%" + id + "%"
 	} else {
-		query = fmt.Sprintf(lookupLogsThread, mom.chanID)
+		query = fmt.Sprintf(lookupLogsThread, mom.config.ChanID)
 	}
 
 	stmt, err := db.Prepare(query)
@@ -452,7 +454,7 @@ func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
 	)
 
 	if userID != "" {
-		query = fmt.Sprintf(lookupThreadsUser, mom.chanID)
+		query = fmt.Sprintf(lookupThreadsUser, mom.config.ChanID)
 		stmt, err = db.Prepare(query)
 		if err != nil {
 			return nil, err
@@ -460,7 +462,7 @@ func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
 		defer stmt.Close()
 		result, err = stmt.Query("%"+userID+"%", 10, 10*(page-1))
 	} else {
-		query = fmt.Sprintf(lookupThreads, mom.chanID)
+		query = fmt.Sprintf(lookupThreads, mom.config.ChanID)
 		stmt, err = db.Prepare(query)
 		if err != nil {
 			return nil, err
@@ -490,9 +492,13 @@ func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
 	return threads, nil
 }
 
+func (mom *mother) getMsg(key string) string {
+	return mom.config.Lang[key]
+}
+
 func (mom *mother) shutdown() {
 	mom.online = false
 	mom.rtm.Disconnect()
 	mom.reapConversations(0)
-	log.Println(mom.name + " disconnected")
+	log.Println(mom.config.Name + " disconnected")
 }

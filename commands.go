@@ -43,7 +43,7 @@ func cmdBlacklist(mom *mother, chanID, threadID, _ string, args []string) bool {
 			}
 			sb.WriteString(fmt.Sprintf("<@%s>", id))
 		}
-		msg := fmt.Sprintf(listBlacklisted, sb.String())
+		msg := fmt.Sprintf(mom.getMsg("listBlacklisted"), sb.String())
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, chanID, slack.RTMsgOptionTS(threadID)))
 		return true
 	}
@@ -112,7 +112,7 @@ func cmdContact(mom *mother, chanID, threadID, _ string, args []string) bool {
 	}
 	if err != nil {
 		log.Println(err)
-		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(highVolumeError, chanID, slack.RTMsgOptionTS(threadID)))
+		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(mom.getMsg("highVolumeError"), chanID, slack.RTMsgOptionTS(threadID)))
 		return false
 	}
 	return true
