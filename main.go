@@ -13,6 +13,7 @@ type botConfig struct {
 	Name                 string
 	Token                string
 	ChanID               string
+	Enabled              bool
 	SessionTimeout       int64
 	TimeoutCheckInterval int64
 	ThreadsPerPage       int
@@ -42,7 +43,8 @@ func handleEvents(events <-chan botEvent) {
 
 		switch ev := bot.msg.Data.(type) {
 		case *slack.MessageEvent:
-			if mom.isBlacklisted(ev.User) || len(ev.Text) == 0 {
+			edit := ev.SubType == "message_changed"
+			if (edit && mom.isBlacklisted(ev.SubMessage.User)) || mom.isBlacklisted(ev.User) {
 				break
 			}
 			chanInfo := mom.getChannelInfo(ev.Channel)
@@ -50,7 +52,7 @@ func handleEvents(events <-chan botEvent) {
 				break
 			}
 
-			if ev.SubType == "message_changed" {
+			if edit {
 				mom.handleMessageChangedEvent(ev, chanInfo)
 			} else if ev.Channel == mom.config.ChanID {
 				mom.handleChannelMessageEvent(ev)
@@ -104,9 +106,13 @@ func main() {
 	events := make(chan botEvent)
 	defer close(events)
 
-	mothers := make([]*mother, len(bc))
-	for i, config := range bc {
-		mothers[i] = newMother(config)
+	mothers := make([]*mother, 0)
+	for _, config := range bc {
+		if !config.Enabled {
+			continue
+		}
+		mom := newMother(config)
+		mothers = append(mothers, mom)
 
 		go func(mom *mother) {
 			for msg := range mom.rtm.IncomingEvents {
@@ -118,7 +124,7 @@ func main() {
 					msg: msg,
 				}
 			}
-		}(mothers[i])
+		}(mom)
 
 		go func(mom *mother) {
 			for mom.online {
@@ -133,7 +139,7 @@ func main() {
 					},
 				}
 			}
-		}(mothers[i])
+		}(mom)
 	}
 
 	// Builds blacklist of bots in action and automatically adds them
