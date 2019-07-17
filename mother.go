@@ -63,12 +63,12 @@ func newMother(config botConfig) *mother {
 	query := fmt.Sprintf(lookupBlacklisted, config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 	defer stmt.Close()
 	result, err := stmt.Query()
 	if err != nil {
-		log.Fatal(err)
+		logger.Fatal(err)
 	}
 	defer result.Close()
 	for result.Next() {
@@ -76,7 +76,7 @@ func newMother(config botConfig) *mother {
 
 		err := result.Scan(&userID)
 		if err != nil {
-			log.Fatal(err)
+			logger.Fatal(err)
 		}
 		mom.blacklist = append(mom.blacklist, userID)
 	}
@@ -100,13 +100,13 @@ func (mom *mother) blacklistUser(userID string) bool {
 	query := fmt.Sprintf(insertBlacklisted, mom.config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return false
 	}
 	defer stmt.Close()
 	_, err = stmt.Exec(userID)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return false
 	}
 
@@ -128,13 +128,13 @@ func (mom *mother) removeBlacklistedUser(userID string) bool {
 	query := fmt.Sprintf(deleteBlacklisted, mom.config.ChanID)
 	stmt, err := db.Prepare(query)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return false
 	}
 	defer stmt.Close()
 	_, err = stmt.Exec(userID)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return false
 	}
 
@@ -153,7 +153,7 @@ func (mom *mother) addConversation(conv *conversation) {
 		link = mom.getMessageLink(prev.threadID)
 		conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedFrom"), link))
 		if err := prev.save(); err != nil {
-			log.Println(err)
+			mom.log.Println(err)
 			mom.convos[prev.threadID+strconv.FormatInt(prev.lastUpdate, 10)] = prev
 		}
 	}
@@ -212,7 +212,7 @@ func (mom *mother) reapConversations(sessionTimeout int64) {
 		}
 		err := conv.save()
 		if err != nil {
-			log.Println(err)
+			mom.log.Println(err)
 			continue
 		}
 		delete(mom.convos, key)
@@ -234,7 +234,7 @@ func (mom *mother) findConversation(timestamp string, loadExpired bool) *convers
 
 	conv, err := mom.loadConversation(timestamp)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return nil
 	}
 	return conv
@@ -301,7 +301,7 @@ func (mom *mother) getChannelInfo(chanID string) *slack.Channel {
 	}
 	chanInfo, err := mom.rtm.GetConversationInfo(chanID, false)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return nil
 	}
 
@@ -312,7 +312,7 @@ func (mom *mother) getChannelInfo(chanID string) *slack.Channel {
 	}
 	members, _, err := mom.rtm.GetUsersInConversation(&params)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		if len(chanInfo.Members) == 0 {
 			return nil
 		}
@@ -331,7 +331,7 @@ func (mom *mother) getUser(userID string) *slack.User {
 	}
 	user, err := mom.rtm.GetUserInfo(userID)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		return nil
 	}
 	mom.users[userID] = user
@@ -392,7 +392,7 @@ func (mom *mother) runCommand(ev *slack.MessageEvent) {
 	if !present {
 		err := mom.rtm.AddReaction(mom.getMsg("reactUnknown"), ref)
 		if err != nil {
-			log.Println(err)
+			mom.log.Println(err)
 		}
 		return
 	}
@@ -407,7 +407,7 @@ func (mom *mother) runCommand(ev *slack.MessageEvent) {
 	}
 	err := mom.rtm.AddReaction(reaction, ref)
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 	}
 }
 
@@ -500,5 +500,5 @@ func (mom *mother) shutdown() {
 	mom.online = false
 	mom.rtm.Disconnect()
 	mom.reapConversations(0)
-	log.Println(mom.config.Name + " disconnected")
+	mom.log.Println(mom.config.Name + " disconnected")
 }

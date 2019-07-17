@@ -2,10 +2,50 @@ package main
 
 import (
 	"fmt"
-	"log"
-
 	"github.com/nlopes/slack"
+	"os"
 )
+
+func (mom *mother) forwardAttachment(attachments []slack.File, chanID, threadID string) error {
+	var attach *slack.File
+
+	for _, file := range attachments {
+		if file.URLPrivateDownload != "" {
+			attach = &file
+			break
+		}
+	}
+	if attach == nil {
+		return nil
+	}
+
+	file, err := os.Create(attach.Name)
+	if err != nil {
+		return err
+	}
+	err = mom.rtm.GetFile(attach.URLPrivateDownload, file)
+	_ = file.Close()
+
+	chanArray := make([]string, 1)
+	chanArray[0] = chanID
+	_, err = mom.rtm.UploadFile(slack.FileUploadParameters{
+		File:            attach.Name,
+		Filename:        attach.Name,
+		Title:           attach.Title,
+		Channels:        chanArray,
+		ThreadTimestamp: threadID,
+	})
+	if err != nil {
+		return err
+	}
+
+	err = os.Remove(attach.Name)
+	if err != nil {
+		mom.log.Println(err)
+	}
+
+	return nil
+}
 
 func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 	threadID := ev.ThreadTimestamp
@@ -23,11 +63,23 @@ func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 				original:  true,
 			}
 			conv.addLog(directTimestamp, ev.Timestamp, entry)
+
+			if len(ev.Files) > 0 {
+				err := mom.forwardAttachment(ev.Files, conv.dmID, "")
+				if err != nil {
+					mom.log.Println(err)
+					ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
+					err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
+					if err != nil {
+						mom.log.Println(err)
+					}
+				}
+			}
 			return
 		}
 	}
 
-	if len(ev.Text) > 0 && ev.Text[0] == '!' {
+	if ev.Text != "" && ev.Text[0] == '!' {
 		mom.runCommand(ev)
 	}
 }
@@ -48,7 +100,7 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 		}
 	}
 	if member {
-		if mom.hasMember(ev.User) && len(ev.Text) > 0 && ev.Text[0] == '!' {
+		if mom.hasMember(ev.User) && ev.Text != "" && ev.Text[0] == '!' {
 			mom.runCommand(ev)
 		} else {
 			chanName := mom.getChannelInfo(mom.config.ChanID).Name
@@ -58,25 +110,27 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 	}
 
 	var (
-		conv *conversation
-		err  error
+		conv          *conversation
+		convTimestamp string
+		err           error
 	)
 
 	conv, present := mom.convos[ev.Channel]
 	if !present {
 		conv, err = mom.startConversation(chanInfo.Members, ev.Channel, true)
 		if err != nil {
-			log.Println(err)
+			mom.log.Println(err)
 			rtm.SendMessage(rtm.NewOutgoingMessage(mom.getMsg("highVolumeError"), ev.Channel))
 			return
 		}
 	}
 
 	msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
-	convTimestamp, err := conv.postMessageToThread(msg)
+	convTimestamp, err = conv.postMessageToThread(msg)
 	if err != nil {
 		return
 	}
+
 	entry := logEntry{
 		userID:    ev.User,
 		msg:       ev.Text,
@@ -84,6 +138,18 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 		original:  true,
 	}
 	conv.addLog(ev.Timestamp, convTimestamp, entry)
+
+	if len(ev.Files) > 0 {
+		err := mom.forwardAttachment(ev.Files, mom.config.ChanID, conv.threadID)
+		if err != nil {
+			mom.log.Println(err)
+			ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
+			err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
+			if err != nil {
+				mom.log.Println(err)
+			}
+		}
+	}
 }
 
 func (mom *mother) handleMessageChangedEvent(ev *slack.MessageEvent, chanInfo *slack.Channel) {

@@ -43,10 +43,14 @@ func handleEvents(events <-chan botEvent) {
 
 		switch ev := bot.msg.Data.(type) {
 		case *slack.MessageEvent:
+			if ev.SubType == "message_replied" {
+				break // Thread update events
+			}
 			edit := ev.SubType == "message_changed"
 			if (edit && mom.isBlacklisted(ev.SubMessage.User)) || mom.isBlacklisted(ev.User) {
 				break
 			}
+
 			chanInfo := mom.getChannelInfo(ev.Channel)
 			if chanInfo == nil {
 				break
@@ -74,7 +78,7 @@ func handleEvents(events <-chan botEvent) {
 			fmt.Println("Connection counter:", ev.ConnectionCount)
 
 		case *slack.RateLimitedError:
-			log.Println("Hitting RTM rate limit")
+			mom.log.Println("Hitting RTM rate limit")
 			time.Sleep(ev.RetryAfter * time.Second)
 
 		case *blacklistEvent:
@@ -128,7 +132,7 @@ func main() {
 
 		go func(mom *mother) {
 			for mom.online {
-				time.Sleep(time.Duration(mom.config.TimeoutCheckInterval) * time.Millisecond)
+				time.Sleep(time.Duration(int64(time.Second) * mom.config.TimeoutCheckInterval))
 				events <- botEvent{
 					mom: mom,
 					msg: slack.RTMEvent{

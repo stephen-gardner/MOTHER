@@ -3,7 +3,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"log"
 	"regexp"
 	"sort"
 	"strings"
@@ -111,7 +110,7 @@ func cmdContact(mom *mother, chanID, threadID, _ string, args []string) bool {
 		_, err = mom.startConversation(users, conv.dmID, false)
 	}
 	if err != nil {
-		log.Println(err)
+		mom.log.Println(err)
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(mom.getMsg("highVolumeError"), chanID, slack.RTMsgOptionTS(threadID)))
 		return false
 	}

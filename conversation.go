@@ -3,7 +3,6 @@ package main
 import (
 	"database/sql"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -31,12 +30,12 @@ type (
 	}
 )
 
-func (conv *conversation) addLog(directTimestamp, convTimestamp string, log logEntry) {
+func (conv *conversation) addLog(directTimestamp, convTimestamp string, entry logEntry) {
 	if prev, present := conv.logs[directTimestamp]; present {
 		conv.editedLogs = append(conv.editedLogs, prev)
 	}
 
-	conv.logs[directTimestamp] = log
+	conv.logs[directTimestamp] = entry
 	conv.directIndex[directTimestamp] = convTimestamp
 	conv.convIndex[convTimestamp] = directTimestamp
 	conv.update()
@@ -131,7 +130,7 @@ func (conv *conversation) updateMessage(userID, timestamp, msg string, isDirect 
 		slack.MsgOptionText(tagged, false),
 	)
 	if err != nil {
-		log.Println(err)
+		conv.mom.log.Println(err)
 		return
 	}
 	entry := logEntry{
