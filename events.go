@@ -6,10 +6,20 @@ import (
 	"os"
 )
 
-func (mom *mother) forwardAttachment(attachments []slack.File, chanID, threadID string) error {
+type forwardingParams struct {
+	conv            *conversation
+	files           []slack.File
+	chanID          string
+	threadID        string
+	userID          string
+	directTimestamp string
+	convTimestamp   string
+}
+
+func forwardAttachment(mom *mother, params forwardingParams) error {
 	var attach *slack.File
 
-	for _, file := range attachments {
+	for _, file := range params.files {
 		if file.URLPrivateDownload != "" {
 			attach = &file
 			break
@@ -27,14 +37,16 @@ func (mom *mother) forwardAttachment(attachments []slack.File, chanID, threadID 
 	_ = file.Close()
 
 	chanArray := make([]string, 1)
-	chanArray[0] = chanID
-	_, err = mom.rtm.UploadFile(slack.FileUploadParameters{
-		File:            attach.Name,
-		Filename:        attach.Name,
-		Title:           attach.Title,
-		Channels:        chanArray,
-		ThreadTimestamp: threadID,
-	})
+	chanArray[0] = params.chanID
+	upload, err := mom.rtm.UploadFile(
+		slack.FileUploadParameters{
+			File:            attach.Name,
+			Filename:        attach.Name,
+			Title:           attach.Title,
+			Channels:        chanArray,
+			ThreadTimestamp: params.threadID,
+		},
+	)
 	if err != nil {
 		return err
 	}
@@ -44,6 +56,13 @@ func (mom *mother) forwardAttachment(attachments []slack.File, chanID, threadID 
 		mom.log.Println(err)
 	}
 
+	entry := logEntry{
+		userID:    params.userID,
+		msg:       fmt.Sprintf(mom.getMsg("uploadedFile"), upload.URLPrivateDownload),
+		timestamp: params.convTimestamp + "a",
+		original:  true,
+	}
+	params.conv.addLog(params.directTimestamp+"a", params.convTimestamp+"a", entry)
 	return nil
 }
 
@@ -64,15 +83,25 @@ func (mom *mother) handleChannelMessageEvent(ev *slack.MessageEvent) {
 			}
 			conv.addLog(directTimestamp, ev.Timestamp, entry)
 
-			if len(ev.Files) > 0 {
-				err := mom.forwardAttachment(ev.Files, conv.dmID, "")
+			if len(ev.Files) == 0 {
+				return
+			}
+			params := forwardingParams{
+				conv:            conv,
+				files:           ev.Files,
+				chanID:          conv.dmID,
+				threadID:        "",
+				userID:          ev.User,
+				directTimestamp: directTimestamp,
+				convTimestamp:   ev.Timestamp,
+			}
+			err = forwardAttachment(mom, params)
+			if err != nil {
+				mom.log.Println(err)
+				ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
+				err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
 				if err != nil {
 					mom.log.Println(err)
-					ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
-					err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
-					if err != nil {
-						mom.log.Println(err)
-					}
 				}
 			}
 			return
@@ -139,15 +168,25 @@ func (mom *mother) handleDirectMessageEvent(ev *slack.MessageEvent, chanInfo *sl
 	}
 	conv.addLog(ev.Timestamp, convTimestamp, entry)
 
-	if len(ev.Files) > 0 {
-		err := mom.forwardAttachment(ev.Files, mom.config.ChanID, conv.threadID)
+	if len(ev.Files) == 0 {
+		return
+	}
+	params := forwardingParams{
+		conv:            conv,
+		files:           ev.Files,
+		chanID:          mom.config.ChanID,
+		threadID:        conv.threadID,
+		userID:          ev.User,
+		directTimestamp: ev.Timestamp,
+		convTimestamp:   convTimestamp,
+	}
+	err = forwardAttachment(mom, params)
+	if err != nil {
+		mom.log.Println(err)
+		ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
+		err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
 		if err != nil {
 			mom.log.Println(err)
-			ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
-			err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
-			if err != nil {
-				mom.log.Println(err)
-			}
 		}
 	}
 }
