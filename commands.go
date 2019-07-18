@@ -10,9 +10,18 @@ import (
 	"github.com/nlopes/slack"
 )
 
-var commands = map[string]func(*mother, string, string, string, []string) bool{
+type cmdParams struct {
+	mom      *mother
+	chanID   string
+	threadID string
+	userID   string
+	args     []string
+}
+
+var commands = map[string]func(params cmdParams) bool{
 	"blacklist": cmdBlacklist,
 	"contact":   cmdContact,
+	"resume":    cmdResume,
 }
 
 func getTaggedUserID(tag string) (string, error) {
@@ -27,8 +36,9 @@ func getTaggedUserID(tag string) (string, error) {
 	return res[1], nil
 }
 
-func cmdBlacklist(mom *mother, chanID, threadID, _ string, args []string) bool {
-	if len(args) == 0 {
+func cmdBlacklist(params cmdParams) bool {
+	mom := params.mom
+	if len(params.args) == 0 {
 		var sb strings.Builder
 
 		blacklist := mom.blacklist
@@ -43,21 +53,22 @@ func cmdBlacklist(mom *mother, chanID, threadID, _ string, args []string) bool {
 			sb.WriteString(fmt.Sprintf("<@%s>", id))
 		}
 		msg := fmt.Sprintf(mom.getMsg("listBlacklisted"), sb.String())
-		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, chanID, slack.RTMsgOptionTS(threadID)))
+		out := mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID))
+		mom.rtm.SendMessage(out)
 		return true
 	}
 
 	rm := false
-	if args[0] == "rm" {
-		if len(args) < 2 {
+	if params.args[0] == "rm" {
+		if len(params.args) < 2 {
 			return false
 		}
 		rm = true
-		args = args[1:]
+		params.args = params.args[1:]
 	}
 
 	users := make([]string, 0)
-	for _, tag := range args {
+	for _, tag := range params.args {
 		ID, err := getTaggedUserID(tag)
 		if err != nil || mom.hasMember(ID) {
 			return false
@@ -77,12 +88,13 @@ func cmdBlacklist(mom *mother, chanID, threadID, _ string, args []string) bool {
 	return true
 }
 
-func cmdContact(mom *mother, chanID, threadID, _ string, args []string) bool {
-	if len(args) == 0 {
+func cmdContact(params cmdParams) bool {
+	mom := params.mom
+	if len(params.args) == 0 {
 		return false
 	}
 	users := make([]string, 0)
-	for _, tag := range args {
+	for _, tag := range params.args {
 		ID, err := getTaggedUserID(tag)
 		if err != nil || mom.hasMember(ID) || mom.isBlacklisted(ID) {
 			return false
@@ -90,12 +102,11 @@ func cmdContact(mom *mother, chanID, threadID, _ string, args []string) bool {
 		users = append(users, ID)
 	}
 
-	conv := mom.findConversationByUsers(users)
 	var (
 		dm  *slack.Channel
 		err error
 	)
-	if conv == nil {
+	if conv := mom.findConversationByUsers(users); conv == nil {
 		params := slack.OpenConversationParameters{
 			ChannelID: "",
 			ReturnIM:  true,
@@ -111,7 +122,61 @@ func cmdContact(mom *mother, chanID, threadID, _ string, args []string) bool {
 	}
 	if err != nil {
 		mom.log.Println(err)
-		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(mom.getMsg("highVolumeError"), chanID, slack.RTMsgOptionTS(threadID)))
+		out := mom.rtm.NewOutgoingMessage(
+			mom.getMsg("highVolumeError"),
+			params.chanID,
+			slack.RTMsgOptionTS(params.threadID),
+		)
+		mom.rtm.SendMessage(out)
+		return false
+	}
+	return true
+}
+
+func cmdResume(params cmdParams) bool {
+	mom := params.mom
+	if len(params.args) == 0 {
+		return false
+	}
+
+	var conv *conversation
+
+	if len(params.args) == 1 && strings.ContainsRune(params.args[0], '.') {
+		conv = mom.findConversation(params.args[0], true)
+	} else {
+		users := make([]string, 0)
+		for _, tag := range params.args {
+			ID, err := getTaggedUserID(tag)
+			if err != nil || mom.hasMember(ID) || mom.isBlacklisted(ID) {
+				return false
+			}
+			users = append(users, ID)
+		}
+		conv = mom.findConversationByUsers(users)
+
+		if conv == nil {
+			threads, err := mom.lookupThreads(&users, 1)
+			if err == nil && len(threads) > 0 {
+				conv, err = mom.loadConversation(threads[0].threadID)
+			}
+			if err != nil {
+				mom.log.Println(err)
+			}
+		}
+	}
+
+	if conv == nil {
+		return false
+	}
+
+	if _, err := mom.startConversation(conv.userIDs, conv.dmID, false); err != nil {
+		mom.log.Println(err)
+		out := mom.rtm.NewOutgoingMessage(
+			mom.getMsg("highVolumeError"),
+			params.chanID,
+			slack.RTMsgOptionTS(params.threadID),
+		)
+		mom.rtm.SendMessage(out)
 		return false
 	}
 	return true

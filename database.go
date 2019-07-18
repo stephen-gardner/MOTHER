@@ -47,7 +47,7 @@ const (
 		" ORDER BY timestamp DESC" +
 		" LIMIT ?" +
 		" OFFSET ?;"
-	lookupThreadsUser = "SELECT * FROM %s_index" +
+	lookupThreadsUsers = "SELECT * FROM %s_index" +
 		" WHERE user_ids LIKE ?" +
 		" ORDER BY timestamp DESC" +
 		" LIMIT ?" +

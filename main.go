@@ -57,21 +57,21 @@ func handleEvents(events <-chan botEvent) {
 			}
 
 			if edit {
-				mom.handleMessageChangedEvent(ev, chanInfo)
+				handleMessageChangedEvent(mom, ev, chanInfo)
 			} else if ev.Channel == mom.config.ChanID {
-				mom.handleChannelMessageEvent(ev)
+				handleChannelMessageEvent(mom, ev)
 			} else if chanInfo.IsIM || chanInfo.IsMpIM {
-				mom.handleDirectMessageEvent(ev, chanInfo)
+				handleDirectMessageEvent(mom, ev, chanInfo)
 			}
 
 		case *slack.UserTypingEvent:
-			mom.handleUserTypingEvent(ev)
+			handleUserTypingEvent(mom, ev)
 
 		case *slack.ReactionAddedEvent:
-			mom.handleReactionAddedEvent(ev)
+			handleReactionAddedEvent(mom, ev)
 
 		case *slack.ReactionRemovedEvent:
-			mom.handleReactionRemovedEvent(ev)
+			handleReactionRemovedEvent(mom, ev)
 
 		case *slack.ConnectedEvent:
 			fmt.Println("Infos:", ev.Info)
@@ -86,6 +86,7 @@ func handleEvents(events <-chan botEvent) {
 
 		case *scrubEvent:
 			mom.reapConversations(mom.config.SessionTimeout)
+			delete(mom.chanInfo, mom.config.ChanID)
 
 		default:
 			// Ignore other events..

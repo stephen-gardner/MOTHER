@@ -180,9 +180,6 @@ func (mom *mother) startConversation(userIDs []string, dmID string, notifyUser b
 
 	first := true
 	for _, ID := range userIDs {
-		if ID == mom.rtm.GetInfo().User.ID {
-			continue
-		}
 		if first {
 			first = false
 		} else {
@@ -273,8 +270,8 @@ func (mom *mother) loadConversation(threadID string) (*conversation, error) {
 	}
 
 	users := strings.Split(userIDs, ",")
-	for _, user := range users {
-		if mom.hasMember(user) {
+	for _, userID := range users {
+		if mom.hasMember(userID) || mom.isBlacklisted(userID) {
 			return nil, nil
 		}
 	}
@@ -317,7 +314,13 @@ func (mom *mother) getChannelInfo(chanID string) *slack.Channel {
 			return nil
 		}
 	} else {
-		chanInfo.Members = members
+		users := make([]string, 0)
+		for _, userID := range members {
+			if userID != mom.rtm.GetInfo().User.ID {
+				users = append(users, userID)
+			}
+		}
+		chanInfo.Members = users
 	}
 
 	mom.chanInfo[chanID] = chanInfo
@@ -342,9 +345,7 @@ func (mom *mother) hasMember(userID string) bool {
 	chanInfo := mom.getChannelInfo(mom.config.ChanID)
 	if chanInfo != nil {
 		for _, member := range chanInfo.Members {
-			if member == mom.rtm.GetInfo().User.ID {
-				continue
-			} else if userID == member {
+			if member == userID {
 				return true
 			}
 		}
@@ -388,6 +389,7 @@ func (mom *mother) runCommand(ev *slack.MessageEvent) {
 	args := strings.Split(ev.Text, " ")
 	cmdName := strings.ToLower(args[0])[1:]
 	ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
+
 	cmd, present := commands[cmdName]
 	if !present {
 		err := mom.rtm.AddReaction(mom.getMsg("reactUnknown"), ref)
@@ -397,9 +399,27 @@ func (mom *mother) runCommand(ev *slack.MessageEvent) {
 		return
 	}
 
-	success := cmd(mom, ev.Channel, ev.ThreadTimestamp, ev.User, args[1:])
+	var (
+		threadID string
+		reaction string
+	)
 
-	var reaction string
+	if ev.ThreadTimestamp == "" {
+		threadID = ev.Timestamp
+	} else {
+		threadID = ev.ThreadTimestamp
+	}
+
+	success := cmd(
+		cmdParams{
+			mom:      mom,
+			chanID:   ev.Channel,
+			threadID: threadID,
+			userID:   ev.User,
+			args:     args[1:],
+		},
+	)
+
 	if success {
 		reaction = mom.getMsg("reactSuccess")
 	} else {
@@ -445,22 +465,31 @@ func (mom *mother) lookupLogs(id string, isUser bool) ([]logEntry, error) {
 	return logs, nil
 }
 
-func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
+func (mom *mother) lookupThreads(users *[]string, page int) ([]convInfo, error) {
 	var (
 		query  string
+		sb     strings.Builder
 		stmt   *sql.Stmt
 		result *sql.Rows
 		err    error
 	)
 
-	if userID != "" {
-		query = fmt.Sprintf(lookupThreadsUser, mom.config.ChanID)
+	tpp := mom.config.ThreadsPerPage
+	if users != nil {
+		query = fmt.Sprintf(lookupThreadsUsers, mom.config.ChanID)
 		stmt, err = db.Prepare(query)
 		if err != nil {
 			return nil, err
 		}
 		defer stmt.Close()
-		result, err = stmt.Query("%"+userID+"%", 10, 10*(page-1))
+
+		sort.Strings(*users)
+		sb.WriteString("%")
+		for _, ID := range *users {
+			sb.WriteString(fmt.Sprintf("%s%%", ID))
+		}
+
+		result, err = stmt.Query(sb.String(), tpp, tpp*(page-1))
 	} else {
 		query = fmt.Sprintf(lookupThreads, mom.config.ChanID)
 		stmt, err = db.Prepare(query)
@@ -468,7 +497,7 @@ func (mom *mother) lookupThreads(userID string, page int) ([]convInfo, error) {
 			return nil, err
 		}
 		defer stmt.Close()
-		result, err = stmt.Query(10, 10*(page-1))
+		result, err = stmt.Query(tpp, tpp*(page-1))
 	}
 	if err != nil {
 		return nil, err
