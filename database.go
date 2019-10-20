@@ -19,6 +19,7 @@ func openConnection() {
 	}
 	if err = db.AutoMigrate(
 		&Mother{},
+		&BlacklistedUser{},
 		&Conversation{},
 		&MessageLog{},
 	).Error; err != nil {

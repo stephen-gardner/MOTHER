@@ -39,6 +39,7 @@ func getMother(config botConfig) *Mother {
 	go rtm.ManageConnection()
 
 	mom := &Mother{
+		Name:      config.Name,
 		config:    config,
 		log:       logger,
 		rtm:       rtm,
@@ -51,7 +52,7 @@ func getMother(config botConfig) *Mother {
 	threshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))
 	q := db.Where("name = ?", config.Name)
 	q = q.Preload("BlacklistedUsers")
-	q = q.Preload("Conversations", "last_updated > ?", threshold)
+	q = q.Preload("Conversations", "updated_at > ?", threshold)
 	q = q.Preload("Conversations.MessageLogs")
 	if err := q.FirstOrCreate(mom).Error; err != nil {
 		mom.log.Fatal(err)
@@ -97,7 +98,7 @@ func (mom *Mother) removeBlacklistedUser(slackID string) bool {
 	return false
 }
 
-func (mom *Mother) beginConversation(directID string, slackIDs []string, notifyUsers bool) (*Conversation, error) {
+func (mom *Mother) createConversation(directID string, slackIDs []string, notifyUsers bool) (*Conversation, error) {
 	var sb strings.Builder
 	first := true
 	for _, ID := range slackIDs {
@@ -113,6 +114,7 @@ func (mom *Mother) beginConversation(directID string, slackIDs []string, notifyU
 	if err != nil {
 		return nil, err
 	}
+
 	conv := &Conversation{
 		MotherID:    mom.ID,
 		SlackIDs:    strings.Join(slackIDs, ","),
@@ -122,6 +124,7 @@ func (mom *Mother) beginConversation(directID string, slackIDs []string, notifyU
 		convIndex:   make(map[string]string),
 		directIndex: make(map[string]string),
 	}
+
 	if err := mom.trackConversation(conv); err != nil {
 		if _, _, err := mom.rtm.DeleteMessage(mom.config.ChanID, threadID); err != nil {
 			// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
@@ -135,62 +138,6 @@ func (mom *Mother) beginConversation(directID string, slackIDs []string, notifyU
 		conv.sendMessageToDM(mom.getMsg("sessionStart"))
 	}
 	return conv, nil
-}
-
-func (mom *Mother) trackConversation(conv *Conversation) error {
-	var prev *Conversation
-	for _, p := range mom.Conversations {
-		if p.active && p.DirectID == conv.DirectID {
-			prev = &p
-			break
-		}
-	}
-	if err := db.Model(mom).Association("Conversations").Append(conv).Error; err != nil {
-		return err
-	}
-	conv.active = true
-	if prev == nil {
-		return nil
-	}
-
-	prev.active = false
-	if err := db.Model(mom).Association("Conversations").Delete(prev).Error; err != nil {
-		// We can let the conversation reaper clean this up if it fails
-		mom.log.Println(err)
-	}
-
-	link := mom.getMessageLink(conv.ThreadID)
-	prev.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedTo"), link))
-	link = mom.getMessageLink(prev.ThreadID)
-	conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedFrom"), link))
-	return nil
-}
-
-func (mom *Mother) findConversation(timestamp string, loadExpired bool) *Conversation {
-	for _, conv := range mom.Conversations {
-		if conv.hasLog(timestamp) {
-			return &conv
-		}
-	}
-	if !loadExpired {
-		return nil
-	}
-	conv, err := mom.loadConversation(timestamp)
-	if err != nil {
-		mom.log.Println(err)
-		return nil
-	}
-	return conv
-}
-
-func (mom *Mother) findConversationByUsers(slackIDs []string) *Conversation {
-	seeking := strings.Join(slackIDs, ",")
-	for _, conv := range mom.Conversations {
-		if seeking == conv.SlackIDs {
-			return &conv
-		}
-	}
-	return nil
 }
 
 func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
@@ -224,6 +171,35 @@ func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 	return conv, nil
 }
 
+func (mom *Mother) trackConversation(conv *Conversation) error {
+	var prev *Conversation
+	for _, p := range mom.Conversations {
+		if p.active && p.DirectID == conv.DirectID {
+			prev = &p
+			break
+		}
+	}
+	if err := db.Model(mom).Association("Conversations").Append(conv).Error; err != nil {
+		return err
+	}
+	conv.active = true
+	if prev == nil {
+		return nil
+	}
+
+	prev.active = false
+	if err := db.Model(mom).Association("Conversations").Delete(prev).Error; err != nil {
+		// We can let the conversation reaper clean this up if it fails
+		mom.log.Println(err)
+	}
+
+	link := mom.getMessageLink(conv.ThreadID)
+	prev.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedTo"), link))
+	link = mom.getMessageLink(prev.ThreadID)
+	conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedFrom"), link))
+	return nil
+}
+
 func (mom *Mother) reapConversations() {
 	epoch := time.Now()
 	for _, conv := range mom.Conversations {
@@ -240,6 +216,43 @@ func (mom *Mother) reapConversations() {
 		conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
 		conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.ThreadID))
 	}
+}
+
+func (mom *Mother) findConversationByChannel(directID string) *Conversation {
+	for _, conv := range mom.Conversations {
+		if conv.DirectID == directID {
+			return &conv
+		}
+	}
+	return nil
+}
+
+func (mom *Mother) findConversationByUsers(slackIDs []string) *Conversation {
+	sort.Strings(slackIDs)
+	seeking := strings.Join(slackIDs, ",")
+	for _, conv := range mom.Conversations {
+		if seeking == conv.SlackIDs {
+			return &conv
+		}
+	}
+	return nil
+}
+
+func (mom *Mother) findConversationByTimestamp(timestamp string, loadExpired bool) *Conversation {
+	for _, conv := range mom.Conversations {
+		if conv.hasLog(timestamp) {
+			return &conv
+		}
+	}
+	if !loadExpired {
+		return nil
+	}
+	conv, err := mom.loadConversation(timestamp)
+	if err != nil {
+		mom.log.Println(err)
+		return nil
+	}
+	return conv
 }
 
 func (mom *Mother) getChannelInfo(chanID string) *slack.Channel {
