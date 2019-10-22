@@ -23,6 +23,7 @@ type (
 		rtm              *slack.RTM                `gorm:"-"`
 		chanInfo         map[string]*slack.Channel `gorm:"-"`
 		usersInfo        map[string]*slack.User    `gorm:"-"`
+		invited          []string                  `gorm:"-"`
 		online           bool                      `gorm:"-"`
 	}
 
@@ -35,7 +36,7 @@ type (
 
 func getMother(config botConfig) *Mother {
 	logger := log.New(os.Stdout, config.Name+": ", log.Lshortfile|log.LstdFlags)
-	rtm := slack.New(config.Token, slack.OptionDebug(true), slack.OptionLog(logger)).NewRTM()
+	rtm := slack.New(config.Token, slack.OptionDebug(false), slack.OptionLog(logger)).NewRTM()
 	go rtm.ManageConnection()
 
 	mom := &Mother{
@@ -45,6 +46,7 @@ func getMother(config botConfig) *Mother {
 		rtm:       rtm,
 		chanInfo:  make(map[string]*slack.Channel),
 		usersInfo: make(map[string]*slack.User),
+		invited:   make([]string, 0),
 		online:    true,
 	}
 
@@ -255,14 +257,13 @@ func (mom *Mother) findConversationByTimestamp(timestamp string, loadExpired boo
 	return conv
 }
 
-func (mom *Mother) getChannelInfo(chanID string) *slack.Channel {
+func (mom *Mother) getChannelInfo(chanID string) (*slack.Channel, error) {
 	if chanInfo, present := mom.chanInfo[chanID]; present {
-		return chanInfo
+		return chanInfo, nil
 	}
 	chanInfo, err := mom.rtm.GetConversationInfo(chanID, false)
 	if err != nil {
-		mom.log.Println(err)
-		return nil
+		return nil, err
 	}
 	members, _, err := mom.rtm.GetUsersInConversation(
 		&slack.GetUsersInConversationParameters{
@@ -272,8 +273,7 @@ func (mom *Mother) getChannelInfo(chanID string) *slack.Channel {
 		},
 	)
 	if err != nil {
-		mom.log.Println(err)
-		return nil
+		return nil, err
 	}
 	// Filter out the bot's slack ID from the list
 	for i, slackID := range members {
@@ -285,7 +285,7 @@ func (mom *Mother) getChannelInfo(chanID string) *slack.Channel {
 	sort.Strings(members)
 	chanInfo.Members = members
 	mom.chanInfo[chanID] = chanInfo
-	return chanInfo
+	return chanInfo, nil
 }
 
 func (mom *Mother) getUserInfo(slackID string) *slack.User {
@@ -302,15 +302,43 @@ func (mom *Mother) getUserInfo(slackID string) *slack.User {
 }
 
 func (mom *Mother) hasMember(slackID string) bool {
-	chanInfo := mom.getChannelInfo(mom.config.ChanID)
-	if chanInfo != nil {
-		for _, member := range chanInfo.Members {
-			if member == slackID {
-				return true
-			}
+	chanInfo, err := mom.getChannelInfo(mom.config.ChanID)
+	if err != nil {
+		mom.log.Println(err)
+		return false
+	}
+	for _, member := range chanInfo.Members {
+		if member == slackID {
+			return true
 		}
 	}
 	return false
+}
+
+func (mom *Mother) isInvited(slackID string) bool {
+	for _, invited := range mom.invited {
+		if invited == slackID {
+			return true
+		}
+	}
+	return false
+}
+
+func (mom *Mother) inviteMember(slackID string) bool {
+	if mom.isInvited(slackID) {
+		return false
+	}
+	mom.invited = append(mom.invited, slackID)
+	return true
+}
+
+func (mom *Mother) removeInvitation(slackID string) {
+	for i, invited := range mom.invited {
+		if invited == slackID {
+			mom.invited = append(mom.invited[:i], mom.invited[i+1:]...)
+			return
+		}
+	}
 }
 
 func (mom *Mother) getMessageLink(timestamp string) string {

@@ -18,10 +18,10 @@ func openConnection() {
 		log.Fatal(err)
 	}
 	if err = db.AutoMigrate(
-		&Mother{},
 		&BlacklistedUser{},
 		&Conversation{},
 		&MessageLog{},
+		&Mother{},
 	).Error; err != nil {
 		log.Fatal(err)
 	}

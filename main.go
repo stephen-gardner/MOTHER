@@ -41,6 +41,12 @@ func handleEvents(mom *Mother) {
 		case *slack.RateLimitedError:
 			mom.log.Println("Hitting RTM rate limit")
 			time.Sleep(ev.RetryAfter * time.Second)
+		case *slack.UserTypingEvent:
+			handleUserTypingEvent(mom, ev)
+		case *slack.MemberJoinedChannelEvent:
+			handleMemberJoinedChannelEvent(mom, ev)
+		case *slack.MemberLeftChannelEvent:
+			handleMemberLeftChannelEvent(mom, ev)
 		default:
 			// Ignore other events..
 		}
@@ -87,11 +93,11 @@ func main() {
 
 	for online := true; online; {
 		online = false
+		time.Sleep(time.Minute)
 		for _, mom := range mothers {
 			if mom.online {
 				online = true
 			}
 		}
-		time.Sleep(time.Minute)
 	}
 }
