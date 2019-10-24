@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"time"
 
 	"github.com/jinzhu/gorm"
 	"github.com/nlopes/slack"
@@ -23,20 +24,32 @@ type (
 
 	MessageLog struct {
 		gorm.Model
-		ConversationID uint
-		SlackID        string
-		Msg            string
-		Timestamp      string
-		Original       bool
+		ConversationID  uint
+		SlackID         string
+		Msg             string
+		DirectTimestamp string
+		ConvTimestamp   string
+		Original        bool
 	}
 )
 
-func (conv *Conversation) addLog(entry *MessageLog, directTimestamp, convTimestamp string) {
+func (conv *Conversation) init(mom *Mother) {
+	conv.mom = mom
+	conv.convIndex = make(map[string]string)
+	conv.directIndex = make(map[string]string)
+	for _, entry := range conv.MessageLogs {
+		conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
+		conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp
+	}
+}
+
+func (conv *Conversation) addLog(entry *MessageLog) {
 	if err := db.Model(conv).Association("MessageLogs").Append(entry).Error; err != nil {
 		conv.mom.log.Println(err)
 	}
-	conv.directIndex[directTimestamp] = convTimestamp
-	conv.convIndex[convTimestamp] = directTimestamp
+	conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
+	conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp
+	conv.update()
 }
 
 func (conv *Conversation) hasLog(timestamp string) bool {
@@ -74,7 +87,6 @@ func (conv *Conversation) sendMessageToDM(msg string) {
 
 func (conv *Conversation) mirrorEdit(slackID, timestamp, msg string, isDirect bool) {
 	var chanID, convTimestamp, directTimestamp, mirrorTimestamp string
-
 	if isDirect {
 		if _, present := conv.directIndex[timestamp]; !present {
 			return
@@ -92,7 +104,6 @@ func (conv *Conversation) mirrorEdit(slackID, timestamp, msg string, isDirect bo
 		mirrorTimestamp = directTimestamp
 		chanID = conv.DirectID
 	}
-
 	tagged := fmt.Sprintf(conv.mom.getMsg("msgCopyFmt"), slackID, msg)
 	_, _, _, err := conv.mom.rtm.UpdateMessage(
 		chanID,
@@ -104,13 +115,14 @@ func (conv *Conversation) mirrorEdit(slackID, timestamp, msg string, isDirect bo
 		return
 	}
 	entry := &MessageLog{
-		ConversationID: conv.ID,
-		SlackID:        slackID,
-		Msg:            msg,
-		Timestamp:      timestamp,
-		Original:       false,
+		ConversationID:  conv.ID,
+		SlackID:         slackID,
+		Msg:             msg,
+		DirectTimestamp: directTimestamp,
+		ConvTimestamp:   convTimestamp,
+		Original:        false,
 	}
-	conv.addLog(entry, directTimestamp, convTimestamp)
+	conv.addLog(entry)
 }
 
 func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, removed bool) {
@@ -132,5 +144,12 @@ func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, remo
 		_ = conv.mom.rtm.RemoveReaction(emoji, targetRef)
 	} else {
 		_ = conv.mom.rtm.AddReaction(emoji, targetRef)
+	}
+	conv.update()
+}
+
+func (conv *Conversation) update() {
+	if err := db.Model(conv.mom).Update("updated_at", time.Now()).Error; err != nil {
+		conv.mom.log.Println(err)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"io/ioutil"
 	"log"
 	"time"
@@ -35,18 +36,46 @@ func loadConfig() []botConfig {
 func handleEvents(mom *Mother) {
 	for inc := range mom.rtm.IncomingEvents {
 		switch ev := inc.Data.(type) {
+		case *slack.ChannelJoinedEvent:
+			handleChannelJoinedEvent(mom, ev)
 		case *slack.ConnectedEvent:
 			mom.log.Println("Infos:", ev.Info)
 			mom.log.Println("Connection counter:", ev.ConnectionCount)
-		case *slack.RateLimitedError:
-			mom.log.Println("Hitting RTM rate limit")
-			time.Sleep(ev.RetryAfter * time.Second)
-		case *slack.UserTypingEvent:
-			handleUserTypingEvent(mom, ev)
+		case *slack.GroupJoinedEvent:
+			handleGroupJoinedEvent(mom, ev)
 		case *slack.MemberJoinedChannelEvent:
 			handleMemberJoinedChannelEvent(mom, ev)
 		case *slack.MemberLeftChannelEvent:
 			handleMemberLeftChannelEvent(mom, ev)
+		case *slack.MessageEvent:
+			if ev.SubType == "message_replied" {
+				break // Thread update events
+			}
+			edit := ev.SubType == "message_changed"
+			if mom.isBlacklisted(ev.User) || (edit && mom.isBlacklisted(ev.SubMessage.User)) {
+				break
+			}
+			chanInfo, err := mom.getChannelInfo(ev.Channel)
+			if err != nil {
+				mom.log.Println(err)
+				break
+			}
+			if edit {
+				handleMessageChangedEvent(mom, ev, chanInfo)
+			} else if ev.Channel == mom.config.ChanID {
+				handleChannelMessageEvent(mom, ev)
+			} else if chanInfo.IsIM || chanInfo.IsMpIM {
+				handleDirectMessageEvent(mom, ev, chanInfo)
+			}
+		case *slack.RateLimitedError:
+			mom.log.Println(fmt.Sprintf("Hitting RTM rate limit; sleeping for %d seconds\n", ev.RetryAfter))
+			time.Sleep(ev.RetryAfter * time.Second)
+		case *slack.ReactionAddedEvent:
+			handleReactionAddedEvent(mom, ev)
+		case *slack.ReactionRemovedEvent:
+			handleReactionRemovedEvent(mom, ev)
+		case *slack.UserTypingEvent:
+			handleUserTypingEvent(mom, ev)
 		default:
 			// Ignore other events..
 		}
@@ -79,16 +108,14 @@ func main() {
 	}
 
 	for _, mom := range mothers {
-		go func(mom *Mother) {
-			mom.blacklistUser("USLACKBOT")
-			// It takes a moment for the bot to initialize and recognize its own identity
-			for mom.rtm.GetInfo() == nil {
-				time.Sleep(time.Second)
-			}
-			for _, other := range mothers {
-				other.blacklistUser(mom.rtm.GetInfo().User.ID)
-			}
-		}(mom)
+		mom.blacklistUser("USLACKBOT")
+		// It takes a moment for the bot to initialize and recognize its own identity
+		for mom.rtm.GetInfo() == nil {
+			time.Sleep(time.Second)
+		}
+		for _, other := range mothers {
+			other.blacklistUser(mom.rtm.GetInfo().User.ID)
+		}
 	}
 
 	for online := true; online; {
