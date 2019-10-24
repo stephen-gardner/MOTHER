@@ -160,8 +160,8 @@ func handleMemberJoinedChannelEvent(mom *Mother, ev *slack.MemberJoinedChannelEv
 	if ev.Channel != mom.config.ChanID {
 		return
 	}
+	// Prevent users from being accidentally invited to the member channel; requires admin privileges
 	if userInfo, err := mom.getUserInfo(mom.rtm.GetInfo().User.ID); err == nil {
-		// Prevent users from being accidentally invited to the member channel
 		if userInfo.IsAdmin {
 			if !mom.isInvited(ev.User) {
 				if err := mom.rtm.KickUserFromConversation(ev.Channel, ev.User); err != nil {
@@ -185,6 +185,7 @@ func handleMemberJoinedChannelEvent(mom *Mother, ev *slack.MemberJoinedChannelEv
 		chanInfo.Members = append(chanInfo.Members, ev.User)
 		sort.Strings(chanInfo.Members)
 	}
+	mom.deactivateConversations(ev.User)
 }
 
 // Update member list

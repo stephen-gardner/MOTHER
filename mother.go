@@ -59,7 +59,6 @@ func getMother(config botConfig) *Mother {
 	}
 	for i := range mom.Conversations {
 		mom.Conversations[i].init(mom)
-		mom.Conversations[i].active = true
 	}
 	return mom
 }
@@ -85,6 +84,7 @@ func (mom *Mother) blacklistUser(slackID string) bool {
 		mom.log.Println(err)
 		return false
 	}
+	mom.deactivateConversations(slackID)
 	return true
 }
 
@@ -118,7 +118,6 @@ func (mom *Mother) createConversation(directID string, slackIDs []string, notify
 		ThreadID: threadID,
 	}
 	conv.init(mom)
-	conv.active = true
 	if err := mom.trackConversation(conv); err != nil {
 		if _, _, err := mom.rtm.DeleteMessage(mom.config.ChanID, threadID); err != nil {
 			// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
@@ -172,6 +171,7 @@ func (mom *Mother) trackConversation(conv *Conversation) error {
 	for i := range mom.Conversations {
 		if mom.Conversations[i].active && mom.Conversations[i].DirectID == conv.DirectID {
 			prev = &mom.Conversations[i]
+			mom.Conversations = append(mom.Conversations[:i], mom.Conversations[i+1:]...)
 			break
 		}
 	}
@@ -179,8 +179,6 @@ func (mom *Mother) trackConversation(conv *Conversation) error {
 		return err
 	}
 	if prev != nil {
-		// Flag inactive for conversation reaping
-		prev.active = false
 		link := mom.getMessageLink(conv.ThreadID)
 		prev.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedTo"), link))
 		link = mom.getMessageLink(prev.ThreadID)
@@ -205,9 +203,20 @@ func (mom *Mother) reapConversations() {
 	mom.Conversations = mom.Conversations[:i]
 }
 
+func (mom *Mother) deactivateConversations(slackID string) {
+	for i := range mom.Conversations {
+		conv := &mom.Conversations[i]
+		for _, ID := range strings.Split(conv.SlackIDs, ",") {
+			if ID == slackID {
+				conv.active = false
+			}
+		}
+	}
+}
+
 func (mom *Mother) findConversationByChannel(directID string) *Conversation {
 	for _, conv := range mom.Conversations {
-		if conv.DirectID == directID {
+		if conv.active && conv.DirectID == directID {
 			return &conv
 		}
 	}
@@ -218,8 +227,9 @@ func (mom *Mother) findConversationByUsers(slackIDs []string) *Conversation {
 	sort.Strings(slackIDs)
 	seeking := strings.Join(slackIDs, ",")
 	for i := range mom.Conversations {
-		if seeking == mom.Conversations[i].SlackIDs {
-			return &mom.Conversations[i]
+		conv := &mom.Conversations[i]
+		if conv.active && seeking == conv.SlackIDs {
+			return conv
 		}
 	}
 	return nil
@@ -227,8 +237,9 @@ func (mom *Mother) findConversationByUsers(slackIDs []string) *Conversation {
 
 func (mom *Mother) findConversationByTimestamp(timestamp string, loadExpired bool) *Conversation {
 	for i := range mom.Conversations {
-		if mom.Conversations[i].hasLog(timestamp) {
-			return &mom.Conversations[i]
+		conv := &mom.Conversations[i]
+		if conv.active && conv.hasLog(timestamp) {
+			return conv
 		}
 	}
 	if !loadExpired {

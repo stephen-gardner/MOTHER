@@ -37,6 +37,7 @@ func (conv *Conversation) init(mom *Mother) {
 	conv.mom = mom
 	conv.convIndex = make(map[string]string)
 	conv.directIndex = make(map[string]string)
+	conv.active = true
 	for _, entry := range conv.MessageLogs {
 		conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
 		conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp
