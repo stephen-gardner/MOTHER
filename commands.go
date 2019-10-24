@@ -17,6 +17,7 @@ type cmdParams struct {
 
 var commands = map[string]func(mom *Mother, params cmdParams) bool{
 	"blacklist": cmdBlacklist,
+	"contact":   cmdContact,
 	"invite":    cmdInvite,
 }
 
@@ -70,6 +71,45 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		}
 	}
 	return res
+}
+
+func cmdContact(mom *Mother, params cmdParams) bool {
+	if len(params.args) == 0 {
+		return false
+	}
+	slackIDs := make([]string, 0)
+	for _, tag := range params.args {
+		ID := getSlackID(tag)
+		if ID == "" || mom.hasMember(ID) || mom.isBlacklisted(ID) {
+			return false
+		}
+		slackIDs = append(slackIDs, ID)
+	}
+
+	if conv := mom.findConversationByUsers(slackIDs); conv == nil {
+		dm, _, _, err := mom.rtm.OpenConversation(
+			&slack.OpenConversationParameters{
+				ChannelID: "",
+				ReturnIM:  true,
+				Users:     slackIDs,
+			},
+		)
+		if err != nil {
+			mom.log.Println(err)
+			return false
+		}
+		if _, err := mom.createConversation(dm.ID, slackIDs, true); err != nil {
+			mom.log.Println(err)
+			return false
+		}
+	} else {
+		// If an active conversation already exists, !contact simply spawns a fresher one
+		if _, err := mom.createConversation(conv.DirectID, slackIDs, false); err != nil {
+			mom.log.Println(err)
+			return false
+		}
+	}
+	return true
 }
 
 func cmdInvite(mom *Mother, params cmdParams) bool {
