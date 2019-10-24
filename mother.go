@@ -48,9 +48,11 @@ func getMother(config botConfig) *Mother {
 		invited:   make([]string, 0),
 		online:    true,
 	}
+	//Load conversations that should still be active
+	updateThreshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))
 	q := db.Where("name = ?", config.Name)
 	q = q.Preload("BlacklistedUsers")
-	q = q.Preload("Conversations")
+	q = q.Preload("Conversations", "updated_at > ?", updateThreshold)
 	q = q.Preload("Conversations.MessageLogs")
 	if err := q.FirstOrCreate(mom).Error; err != nil {
 		mom.log.Fatal(err)
@@ -189,21 +191,18 @@ func (mom *Mother) trackConversation(conv *Conversation) error {
 
 func (mom *Mother) reapConversations() {
 	epoch := time.Now()
-	for i := range mom.Conversations {
-		conv := &mom.Conversations[i]
+	i := 0
+	for _, conv := range mom.Conversations {
 		if conv.active && int64(epoch.Sub(conv.UpdatedAt).Seconds()) < mom.config.SessionTimeout {
-			continue
-		}
-		conv.active = false
-		if err := db.Model(mom).Association("Conversations").Delete(conv).Error; err != nil {
-			// If error, leave for next reaping
-			mom.log.Println(err)
+			mom.Conversations[i] = conv
+			i++
 			continue
 		}
 		delete(mom.chanInfo, conv.DirectID)
 		conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
 		conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.ThreadID))
 	}
+	mom.Conversations = mom.Conversations[:i]
 }
 
 func (mom *Mother) findConversationByChannel(directID string) *Conversation {
