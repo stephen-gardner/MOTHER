@@ -3,8 +3,10 @@ package main
 import (
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 
+	"github.com/jinzhu/gorm"
 	"github.com/nlopes/slack"
 )
 
@@ -19,6 +21,7 @@ var commands = map[string]func(mom *Mother, params cmdParams) bool{
 	"blacklist": cmdBlacklist,
 	"contact":   cmdContact,
 	"invite":    cmdInvite,
+	"resume":    cmdResume,
 }
 
 func getSlackID(tagged string) string {
@@ -128,6 +131,51 @@ func cmdInvite(mom *Mother, params cmdParams) bool {
 	_, err := mom.rtm.InviteUsersToConversation(mom.config.ChanID, slackIDs...)
 	if err != nil {
 		mom.log.Println(err)
+	}
+	return true
+}
+
+func cmdResume(mom *Mother, params cmdParams) bool {
+	if len(params.args) == 0 {
+		return false
+	}
+	var conv *Conversation
+	ID := getSlackID(params.args[0])
+	if len(params.args) == 1 && ID == "" {
+		if conv = mom.findConversationByTimestamp(params.args[0], true); conv == nil {
+			return false
+		}
+	} else if ID != "" {
+		slackIDs := make([]string, 0)
+		for _, tagged := range params.args {
+			ID = getSlackID(tagged)
+			if ID == "" || mom.hasMember(ID) || mom.isBlacklisted(ID) {
+				return false
+			}
+			slackIDs = append(slackIDs, ID)
+		}
+		if conv = mom.findConversationByUsers(slackIDs); conv == nil {
+			var err error
+			conv = &Conversation{}
+			sort.Strings(slackIDs)
+			q := db.Where("slack_ids = ?", strings.Join(slackIDs, ","))
+			q = q.Order("updated_at desc").First(conv)
+			if err = q.Error; err != nil {
+				if err != gorm.ErrRecordNotFound {
+					mom.log.Println(err)
+				}
+				return false
+			}
+			if conv, err = mom.loadConversation(conv.ThreadID); err != nil {
+				mom.log.Println(err)
+				return false
+			}
+		}
+	}
+	_, err := mom.createConversation(conv.DirectID, strings.Split(conv.SlackIDs, ","), false)
+	if err != nil {
+		mom.log.Println(err)
+		return false
 	}
 	return true
 }

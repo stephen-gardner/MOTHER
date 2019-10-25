@@ -33,17 +33,6 @@ type (
 	}
 )
 
-func (conv *Conversation) init(mom *Mother) {
-	conv.mom = mom
-	conv.convIndex = make(map[string]string)
-	conv.directIndex = make(map[string]string)
-	conv.active = true
-	for _, entry := range conv.MessageLogs {
-		conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
-		conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp
-	}
-}
-
 func (conv *Conversation) addLog(entry *MessageLog) {
 	if err := db.Model(conv).Association("MessageLogs").Append(entry).Error; err != nil {
 		conv.mom.log.Println(err)
@@ -147,6 +136,17 @@ func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, remo
 		_ = conv.mom.rtm.AddReaction(emoji, targetRef)
 	}
 	conv.update()
+}
+
+func (conv *Conversation) init(mom *Mother) {
+	conv.mom = mom
+	conv.convIndex = make(map[string]string)
+	conv.directIndex = make(map[string]string)
+	conv.active = true
+	for _, entry := range conv.MessageLogs {
+		conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
+		conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp
+	}
 }
 
 func (conv *Conversation) expire() {

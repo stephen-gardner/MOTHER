@@ -48,7 +48,7 @@ func getMother(config botConfig) *Mother {
 		invited:   make([]string, 0),
 		online:    true,
 	}
-	//Load conversations that should still be active
+	// Load conversations that should still be active
 	updateThreshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))
 	q := db.Where("name = ?", config.Name)
 	q = q.Preload("BlacklistedUsers")
