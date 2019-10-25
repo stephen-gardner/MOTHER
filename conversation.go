@@ -149,6 +149,12 @@ func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, remo
 	conv.update()
 }
 
+func (conv *Conversation) expire() {
+	conv.active = false
+	conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
+	conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.ThreadID))
+}
+
 func (conv *Conversation) update() {
 	if err := db.Model(conv.mom).Update("updated_at", time.Now()).Error; err != nil {
 		conv.mom.log.Println(err)

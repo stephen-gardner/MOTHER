@@ -102,6 +102,7 @@ func (mom *Mother) removeBlacklistedUser(slackID string) bool {
 }
 
 func (mom *Mother) createConversation(directID string, slackIDs []string, notifyUsers bool) (*Conversation, error) {
+	sort.Strings(slackIDs)
 	tagged := make([]string, 0)
 	for _, ID := range slackIDs {
 		tagged = append(tagged, fmt.Sprintf("<@%s>", ID))
@@ -118,7 +119,7 @@ func (mom *Mother) createConversation(directID string, slackIDs []string, notify
 		ThreadID: threadID,
 	}
 	conv.init(mom)
-	if err := mom.trackConversation(conv); err != nil {
+	if _, err := mom.trackConversation(conv); err != nil {
 		if _, _, err := mom.rtm.DeleteMessage(mom.config.ChanID, threadID); err != nil {
 			// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
 			// messages to an inactive thread, but the chances of this many things suddenly going wrong is extremely
@@ -142,7 +143,6 @@ func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 		}
 		return nil, err
 	}
-
 	for _, slackID := range strings.Split(conv.SlackIDs, ",") {
 		// Prevent reactivating conversations with channel members or blacklisted users
 		if mom.hasMember(slackID) || mom.isBlacklisted(slackID) {
@@ -158,25 +158,28 @@ func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 	); err != nil {
 		return nil, err
 	}
-	if err := conv.mom.trackConversation(conv); err != nil {
+	prev, err := conv.mom.trackConversation(conv);
+	if err != nil {
 		return nil, err
 	}
-	conv.sendMessageToThread(conv.mom.getMsg("sessionResumeConv"))
-	conv.sendMessageToDM(conv.mom.getMsg("sessionResumeDirect"))
+	if !prev {
+		conv.sendMessageToThread(conv.mom.getMsg("sessionResumeConv"))
+		conv.sendMessageToDM(conv.mom.getMsg("sessionResumeDirect"))
+	}
 	return conv, nil
 }
 
-func (mom *Mother) trackConversation(conv *Conversation) error {
+func (mom *Mother) trackConversation(conv *Conversation) (bool, error) {
 	var prev *Conversation
-	for i := range mom.Conversations {
+	for i, p := range mom.Conversations {
 		if mom.Conversations[i].active && mom.Conversations[i].DirectID == conv.DirectID {
-			prev = &mom.Conversations[i]
+			prev = &p
 			mom.Conversations = append(mom.Conversations[:i], mom.Conversations[i+1:]...)
 			break
 		}
 	}
 	if err := db.Model(mom).Association("Conversations").Append(conv).Error; err != nil {
-		return err
+		return false, err
 	}
 	if prev != nil {
 		link := mom.getMessageLink(conv.ThreadID)
@@ -184,7 +187,22 @@ func (mom *Mother) trackConversation(conv *Conversation) error {
 		link = mom.getMessageLink(prev.ThreadID)
 		conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedFrom"), link))
 	}
-	return nil
+	return prev != nil, nil
+}
+
+func (mom *Mother) deactivateConversations(slackID string) {
+	for i := range mom.Conversations {
+		conv := &mom.Conversations[i]
+		if !conv.active {
+			continue
+		}
+		for _, ID := range strings.Split(conv.SlackIDs, ",") {
+			if ID == slackID {
+				conv.expire()
+			}
+		}
+	}
+	mom.reapConversations()
 }
 
 func (mom *Mother) reapConversations() {
@@ -197,21 +215,11 @@ func (mom *Mother) reapConversations() {
 			continue
 		}
 		delete(mom.chanInfo, conv.DirectID)
-		conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
-		conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.ThreadID))
-	}
-	mom.Conversations = mom.Conversations[:i]
-}
-
-func (mom *Mother) deactivateConversations(slackID string) {
-	for i := range mom.Conversations {
-		conv := &mom.Conversations[i]
-		for _, ID := range strings.Split(conv.SlackIDs, ",") {
-			if ID == slackID {
-				conv.active = false
-			}
+		if conv.active {
+			conv.expire()
 		}
 	}
+	mom.Conversations = mom.Conversations[:i]
 }
 
 func (mom *Mother) findConversationByChannel(directID string) *Conversation {
