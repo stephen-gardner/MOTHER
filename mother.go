@@ -130,8 +130,9 @@ func (mom *Mother) createConversation(directID string, slackIDs []string, notify
 		}
 		return nil, err
 	}
+	conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionStartConv"), conv.ThreadID))
 	if notifyUsers {
-		conv.sendMessageToDM(mom.getMsg("sessionStart"))
+		conv.sendMessageToDM(mom.getMsg("sessionStartDirect"))
 	}
 	return conv, nil
 }
