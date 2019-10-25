@@ -21,6 +21,7 @@ type (
 		config           botConfig                 `gorm:"-"`
 		log              *log.Logger               `gorm:"-"`
 		rtm              *slack.RTM                `gorm:"-"`
+		events           chan slack.RTMEvent       `gorm:"-"`
 		chanInfo         map[string]*slack.Channel `gorm:"-"`
 		usersInfo        map[string]*slack.User    `gorm:"-"`
 		invited          []string                  `gorm:"-"`
@@ -43,6 +44,7 @@ func getMother(config botConfig) *Mother {
 		config:    config,
 		log:       logger,
 		rtm:       rtm,
+		events:    make(chan slack.RTMEvent),
 		chanInfo:  make(map[string]*slack.Channel),
 		usersInfo: make(map[string]*slack.User),
 		invited:   make([]string, 0),

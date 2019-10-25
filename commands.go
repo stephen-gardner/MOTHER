@@ -19,6 +19,7 @@ type cmdParams struct {
 
 var commands = map[string]func(mom *Mother, params cmdParams) bool{
 	"blacklist": cmdBlacklist,
+	"close":     cmdClose,
 	"contact":   cmdContact,
 	"invite":    cmdInvite,
 	"resume":    cmdResume,
@@ -76,6 +77,33 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 	return res
 }
 
+func cmdClose(mom *Mother, params cmdParams) bool {
+	if len(params.args) == 0 {
+		return false
+	}
+	var conv *Conversation
+	ID := getSlackID(params.args[0])
+	if len(params.args) == 1 && ID == "" {
+		conv = mom.findConversationByTimestamp(params.args[0], false)
+	} else if ID != "" {
+		slackIDs := make([]string, 0)
+		for _, tagged := range params.args {
+			ID = getSlackID(tagged)
+			if ID == "" {
+				return false
+			}
+			slackIDs = append(slackIDs, ID)
+		}
+		conv = mom.findConversationByUsers(slackIDs)
+	}
+	if conv == nil {
+		return false
+	}
+	conv.expire()
+	mom.reapConversations()
+	return true
+}
+
 func cmdContact(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
@@ -88,7 +116,6 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 		}
 		slackIDs = append(slackIDs, ID)
 	}
-
 	if conv := mom.findConversationByUsers(slackIDs); conv == nil {
 		dm, _, _, err := mom.rtm.OpenConversation(
 			&slack.OpenConversationParameters{
@@ -171,6 +198,8 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 				return false
 			}
 		}
+	} else {
+		return false
 	}
 	_, err := mom.createConversation(conv.DirectID, strings.Split(conv.SlackIDs, ","), false)
 	if err != nil {
