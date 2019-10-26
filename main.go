@@ -16,6 +16,7 @@ type (
 		Token                string
 		ChanID               string
 		Enabled              bool
+		MaxFileSize          int
 		SessionTimeout       int64
 		TimeoutCheckInterval int64
 		ThreadsPerPage       int

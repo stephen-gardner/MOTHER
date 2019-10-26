@@ -18,47 +18,35 @@ func handleChannelJoinedEvent(mom *Mother, ev *slack.ChannelJoinedEvent) {
 }
 
 func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent) {
+	var conv *Conversation
 	if ev.ThreadTimestamp != "" {
-		if conv := mom.findConversationByTimestamp(ev.ThreadTimestamp, true); conv != nil {
-			msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
-			directTimestamp, err := conv.postMessageToDM(msg)
-			if err != nil {
-				return
-			}
-			entry := &MessageLog{
-				SlackID:         ev.User,
-				Msg:             ev.Text,
-				DirectTimestamp: directTimestamp,
-				ConvTimestamp:   ev.Timestamp,
-				Original:        true,
-			}
-			conv.addLog(entry)
-
-			//if len(ev.Files) == 0 {
-			//	return
-			//}
-			//params := forwardingParams{
-			//	conv:            conv,
-			//	files:           ev.Files,
-			//	chanID:          conv.dmID,
-			//	threadID:        "",
-			//	userID:          ev.User,
-			//	directTimestamp: directTimestamp,
-			//	convTimestamp:   ev.DirectTimestamp,
-			//}
-			//err = forwardAttachment(mom, params)
-			//if err != nil {
-			//	mom.log.Println(err)
-			//	ref := slack.NewRefToMessage(ev.Channel, ev.DirectTimestamp)
-			//	err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
-			//	if err != nil {
-			//		mom.log.Println(err)
-			//	}
-			//}
+		conv = mom.findConversationByTimestamp(ev.ThreadTimestamp, true)
+	}
+	if conv != nil {
+		msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
+		directTimestamp, err := conv.postMessageToDM(msg)
+		if err != nil {
 			return
 		}
-	}
+		entry := &MessageLog{
+			SlackID:         ev.User,
+			Msg:             ev.Text,
+			DirectTimestamp: directTimestamp,
+			ConvTimestamp:   ev.Timestamp,
+			Original:        true,
+		}
+		conv.addLog(entry)
 
+		for _, attach := range ev.Files {
+			if attach.URLPrivateDownload == "" {
+				continue
+			}
+			if err := conv.mirrorAttachment(attach, entry, false); err != nil {
+				mom.log.Println(err)
+			}
+		}
+		return
+	}
 	if ev.Text != "" && ev.Text[0] == '!' {
 		mom.runCommand(ev)
 	}
@@ -122,27 +110,14 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *sla
 	}
 	conv.addLog(entry)
 
-	//if len(ev.Files) == 0 {
-	//	return
-	//}
-	//params := forwardingParams{
-	//	conv:            conv,
-	//	files:           ev.Files,
-	//	chanID:          mom.config.ChanID,
-	//	threadID:        conv.threadID,
-	//	userID:          ev.User,
-	//	directTimestamp: ev.DirectTimestamp,
-	//	convTimestamp:   convTimestamp,
-	//}
-	//err = forwardAttachment(mom, params)
-	//if err != nil {
-	//	mom.log.Println(err)
-	//	ref := slack.NewRefToMessage(ev.Channel, ev.DirectTimestamp)
-	//	err := mom.rtm.AddReaction(mom.getMsg("reactFailure"), ref)
-	//	if err != nil {
-	//		mom.log.Println(err)
-	//	}
-	//}
+	for _, attach := range ev.Files {
+		if attach.URLPrivateDownload == "" {
+			continue
+		}
+		if err := conv.mirrorAttachment(attach, entry, true); err != nil {
+			mom.log.Println(err)
+		}
+	}
 }
 
 // Leaves random private channels that bot gets invited into

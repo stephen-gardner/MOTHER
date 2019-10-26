@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"time"
 
@@ -73,6 +74,49 @@ func (conv *Conversation) sendMessageToThread(msg string) {
 
 func (conv *Conversation) sendMessageToDM(msg string) {
 	conv.mom.rtm.SendMessage(conv.mom.rtm.NewOutgoingMessage(msg, conv.DirectID))
+}
+
+func (conv *Conversation) mirrorAttachment(file slack.File, msgEntry *MessageLog, isDirect bool) error {
+	var buff bytes.Buffer
+	var threadTimestamp string
+	if file.Size > conv.mom.config.MaxFileSize {
+		msg := fmt.Sprintf(conv.mom.getMsg("fileTooLarge"), file.Name, conv.mom.config.MaxFileSize)
+		conv.sendMessageToDM(msg)
+		conv.sendMessageToThread(msg)
+		return nil
+	}
+	if err := conv.mom.rtm.GetFile(file.URLPrivateDownload, &buff); err != nil {
+		return err
+	}
+	chanID := make([]string, 1)
+	if isDirect {
+		chanID[0] = conv.mom.config.ChanID
+		threadTimestamp = conv.ThreadID
+	} else {
+		chanID[0] = conv.DirectID
+	}
+	upload, err := conv.mom.rtm.UploadFile(
+		slack.FileUploadParameters{
+			Reader:          &buff,
+			Filetype:        file.Filetype,
+			Filename:        file.Name,
+			Title:           file.Title,
+			Channels:        chanID,
+			ThreadTimestamp: threadTimestamp,
+		},
+	)
+	if err != nil {
+		return err
+	}
+	entry := &MessageLog{
+		SlackID:         file.User,
+		Msg:             fmt.Sprintf(conv.mom.getMsg("uploadedFile"), upload.URLPrivateDownload),
+		DirectTimestamp: msgEntry.DirectTimestamp + "a",
+		ConvTimestamp:   msgEntry.ConvTimestamp + "a",
+		Original:        true,
+	}
+	conv.addLog(entry)
+	return nil
 }
 
 func (conv *Conversation) mirrorEdit(slackID, timestamp, msg string, isDirect bool) {

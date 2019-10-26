@@ -54,13 +54,24 @@ func getMother(config botConfig) *Mother {
 	updateThreshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))
 	q := db.Where("name = ?", config.Name)
 	q = q.Preload("BlacklistedUsers")
-	q = q.Preload("Conversations", "updated_at > ?", updateThreshold)
+	q = q.Preload("Conversations", "updated_at > ?", updateThreshold, func(db *gorm.DB) *gorm.DB {
+		return db.Order("conversations.direct_id desc, conversations.updated_at desc")
+	})
 	q = q.Preload("Conversations.MessageLogs")
 	if err := q.FirstOrCreate(mom).Error; err != nil {
 		mom.log.Fatal(err)
 	}
-	for i := range mom.Conversations {
-		mom.Conversations[i].init(mom)
+	// If multiple Conversations per DirectID is loaded, only the most recent should be active
+	i := 0
+	var prev *Conversation
+	for _, conv := range mom.Conversations {
+		if prev != nil && conv.DirectID == prev.DirectID {
+			continue
+		}
+		conv.init(mom)
+		mom.Conversations[i] = conv
+		i++
+		prev = &conv
 	}
 	return mom
 }
