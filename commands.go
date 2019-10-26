@@ -1,10 +1,13 @@
 package main
 
 import (
+	"bytes"
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/jinzhu/gorm"
 	"github.com/nlopes/slack"
@@ -22,6 +25,7 @@ var commands = map[string]func(mom *Mother, params cmdParams) bool{
 	"close":     cmdClose,
 	"contact":   cmdContact,
 	"invite":    cmdInvite,
+	"logs":      cmdLogs,
 	"resume":    cmdResume,
 }
 
@@ -158,6 +162,82 @@ func cmdInvite(mom *Mother, params cmdParams) bool {
 	_, err := mom.rtm.InviteUsersToConversation(mom.config.ChanID, slackIDs...)
 	if err != nil {
 		mom.log.Println(err)
+	}
+	return true
+}
+
+func cmdLogs(mom *Mother, params cmdParams) bool {
+	if len(params.args) == 0 {
+		return false
+	}
+	var convos []Conversation
+	ID := getSlackID(params.args[0])
+	if len(params.args) == 1 && ID == "" {
+		q := db.Where("thread_id = ?", params.args[0])
+		q = q.Preload("MessageLogs")
+		if err := q.Find(&convos).Error; err != nil {
+			if err != gorm.ErrRecordNotFound {
+				mom.log.Println(err)
+			}
+			return false
+		}
+	} else if ID != "" {
+		slackIDs := make([]string, 0)
+		for _, tagged := range params.args {
+			ID = getSlackID(tagged)
+			if ID == "" {
+				return false
+			}
+			slackIDs = append(slackIDs, ID)
+		}
+		sort.Strings(slackIDs)
+		q := db.Where("slack_ids LIKE ?", strings.Join(slackIDs, ","))
+		q = q.Preload("MessageLogs")
+		if err := q.Find(&convos).Error; err != nil {
+			if err != gorm.ErrRecordNotFound {
+				mom.log.Println(err)
+			}
+			return false
+		}
+	}
+	buff := &bytes.Buffer{}
+	first := true
+	for _, conv := range convos {
+		if !first {
+			buff.WriteRune('\n')
+		}
+		buff.WriteString(fmt.Sprintf(mom.getMsg("logThread"), conv.ThreadID))
+		for _, msg := range conv.MessageLogs {
+			if msg.Msg != "" {
+				userInfo, err := mom.getUserInfo(msg.SlackID)
+				if err != nil {
+					mom.log.Println(err)
+					return false
+				}
+				epoch, _ := strconv.ParseInt(strings.Split(msg.ConvTimestamp, ".")[0], 10, 64)
+				timestamp := time.Unix(epoch, 0).String()
+				format := ""
+				if msg.Original {
+					format = mom.getMsg("logMsg")
+				} else {
+					format = mom.getMsg("logMsgEdited")
+				}
+				buff.WriteString(fmt.Sprintf(format, timestamp, userInfo.Profile.DisplayName, msg.Msg))
+			}
+		}
+		first = false
+	}
+	_, err := mom.rtm.UploadFile(
+		slack.FileUploadParameters{
+			Reader:          buff,
+			Filename:        "Logs.txt",
+			Channels:        []string{params.chanID},
+			ThreadTimestamp: params.threadID,
+		},
+	)
+	if err != nil {
+		mom.log.Println(err)
+		return false
 	}
 	return true
 }

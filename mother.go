@@ -73,6 +73,7 @@ func getMother(config botConfig) *Mother {
 		i++
 		prev = &conv
 	}
+	mom.Conversations = mom.Conversations[:i]
 	return mom
 }
 
@@ -172,7 +173,7 @@ func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 	); err != nil {
 		return nil, err
 	}
-	prev, err := conv.mom.trackConversation(conv);
+	prev, err := conv.mom.trackConversation(conv)
 	if err != nil {
 		return nil, err
 	}

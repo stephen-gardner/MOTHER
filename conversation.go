@@ -77,15 +77,15 @@ func (conv *Conversation) sendMessageToDM(msg string) {
 }
 
 func (conv *Conversation) mirrorAttachment(file slack.File, msgEntry *MessageLog, isDirect bool) error {
-	var buff bytes.Buffer
-	var threadTimestamp string
+	buff := &bytes.Buffer{}
+	threadTimestamp := ""
 	if file.Size > conv.mom.config.MaxFileSize {
 		msg := fmt.Sprintf(conv.mom.getMsg("fileTooLarge"), file.Name, conv.mom.config.MaxFileSize)
 		conv.sendMessageToDM(msg)
 		conv.sendMessageToThread(msg)
 		return nil
 	}
-	if err := conv.mom.rtm.GetFile(file.URLPrivateDownload, &buff); err != nil {
+	if err := conv.mom.rtm.GetFile(file.URLPrivateDownload, buff); err != nil {
 		return err
 	}
 	chanID := make([]string, 1)
@@ -97,7 +97,7 @@ func (conv *Conversation) mirrorAttachment(file slack.File, msgEntry *MessageLog
 	}
 	upload, err := conv.mom.rtm.UploadFile(
 		slack.FileUploadParameters{
-			Reader:          &buff,
+			Reader:          buff,
 			Filetype:        file.Filetype,
 			Filename:        file.Name,
 			Title:           file.Title,
