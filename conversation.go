@@ -108,9 +108,15 @@ func (conv *Conversation) mirrorAttachment(file slack.File, msgEntry *MessageLog
 	if err != nil {
 		return err
 	}
+	var fileURL string
+	if isDirect {
+		fileURL = upload.URLPrivate
+	} else {
+		fileURL = file.URLPrivate
+	}
 	entry := &MessageLog{
 		SlackID:         file.User,
-		Msg:             fmt.Sprintf(conv.mom.getMsg("uploadedFile"), upload.URLPrivateDownload),
+		Msg:             fmt.Sprintf(conv.mom.getMsg("uploadedFile"), fileURL),
 		DirectTimestamp: msgEntry.DirectTimestamp + "a",
 		ConvTimestamp:   msgEntry.ConvTimestamp + "a",
 		Original:        true,
