@@ -101,6 +101,7 @@ func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
 func main() {
 	mothers := make([]*Mother, 0)
 	botConfigs := loadConfig()
+	initCommands()
 	openConnection()
 	defer db.Close()
 

@@ -20,14 +20,18 @@ type cmdParams struct {
 	args     []string
 }
 
-var commands = map[string]func(mom *Mother, params cmdParams) bool{
-	"active":    cmdActive,
-	"blacklist": cmdBlacklist,
-	"close":     cmdClose,
-	"contact":   cmdContact,
-	"invite":    cmdInvite,
-	"logs":      cmdLogs,
-	"resume":    cmdResume,
+var commands map[string]func(mom *Mother, params cmdParams) bool
+
+func initCommands() {
+	commands = make(map[string]func(mom *Mother, params cmdParams) bool)
+	commands["active"] = cmdActive
+	commands["blacklist"] = cmdBlacklist
+	commands["close"] = cmdClose
+	commands["contact"] = cmdContact
+	commands["help"] = cmdHelp
+	commands["invite"] = cmdInvite
+	commands["logs"] = cmdLogs
+	commands["resume"] = cmdResume
 }
 
 func getSlackID(tagged string) string {
@@ -171,6 +175,28 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 			return false
 		}
 	}
+	return true
+}
+
+func cmdHelp(mom *Mother, params cmdParams) bool {
+	var out string
+	if len(params.args) == 0 {
+		help := make([]string, 0)
+		for cmd := range commands {
+			key := "cmdHelp" + strings.ToUpper(cmd[0:1]) + cmd[1:]
+			help = append(help, mom.getMsg(key))
+		}
+		sort.Strings(help)
+		out = "*Commands*\n" + strings.Join(help, "\n")
+	} else {
+		cmd := params.args[0]
+		if _, present := commands[cmd]; !present {
+			return false
+		}
+		key := "cmdHelp" + strings.ToUpper(cmd[0:1]) + cmd[1:]
+		out = mom.getMsg(key) + "\n"
+	}
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
 }
 
