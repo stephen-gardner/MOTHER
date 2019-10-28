@@ -21,6 +21,7 @@ type cmdParams struct {
 }
 
 var commands = map[string]func(mom *Mother, params cmdParams) bool{
+	"active":    cmdActive,
 	"blacklist": cmdBlacklist,
 	"close":     cmdClose,
 	"contact":   cmdContact,
@@ -36,6 +37,33 @@ func getSlackID(tagged string) string {
 		return ""
 	}
 	return res[1]
+}
+
+func cmdActive(mom *Mother, params cmdParams) bool {
+	threadList := make([]string, 0)
+	for _, conv := range mom.Conversations {
+		if conv.active {
+			tagged := make([]string, 0)
+			for _, slackID := range strings.Split(conv.SlackIDs, ",") {
+				tagged = append(tagged, fmt.Sprintf("<@%s>", slackID))
+			}
+			line := fmt.Sprintf(
+				mom.getMsg("listActiveElement"),
+				mom.getMessageLink(conv.ThreadID),
+				strings.Join(tagged, ", "),
+				int((time.Duration(mom.config.SessionTimeout)*time.Second)-time.Now().Sub(conv.UpdatedAt)),
+			)
+			threadList = append(threadList, line)
+		}
+	}
+	out := mom.getMsg("listActive")
+	if len(threadList) == 0 {
+		out += mom.getMsg("listNone")
+	} else {
+		out += strings.Join(threadList, "\n")
+	}
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
+	return true
 }
 
 func cmdBlacklist(mom *Mother, params cmdParams) bool {
@@ -113,8 +141,8 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 		return false
 	}
 	slackIDs := make([]string, 0)
-	for _, tag := range params.args {
-		ID := getSlackID(tag)
+	for _, tagged := range params.args {
+		ID := getSlackID(tagged)
 		if ID == "" || mom.hasMember(ID) || mom.isBlacklisted(ID) {
 			return false
 		}

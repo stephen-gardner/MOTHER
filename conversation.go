@@ -206,7 +206,7 @@ func (conv *Conversation) expire() {
 }
 
 func (conv *Conversation) update() {
-	if err := db.Model(conv.mom).Update("updated_at", time.Now()).Error; err != nil {
+	if err := db.Model(conv).Update("updated_at", time.Now()).Error; err != nil {
 		conv.mom.log.Println(err)
 	}
 }
