@@ -76,7 +76,7 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		for _, bu := range mom.BlacklistedUsers {
 			tagged = append(tagged, fmt.Sprintf("<@%s>", bu.SlackID))
 		}
-		msg := fmt.Sprintf(mom.getMsg("listBlacklisted"), strings.Join(tagged, ", "))
+		msg := mom.getMsg("listBlacklisted") + strings.Join(tagged, ", ")
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
@@ -187,7 +187,7 @@ func cmdHelp(mom *Mother, params cmdParams) bool {
 			help = append(help, mom.getMsg(key))
 		}
 		sort.Strings(help)
-		out = "*Commands*\n" + strings.Join(help, "\n")
+		out = mom.getMsg("cmdHelp") + strings.Join(help, "\n")
 	} else {
 		cmd := params.args[0]
 		if _, present := commands[cmd]; !present {

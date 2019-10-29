@@ -1,6 +1,8 @@
 package main
 
 import (
+	"encoding/json"
+	"io/ioutil"
 	"log"
 
 	"github.com/jinzhu/gorm"
@@ -11,18 +13,21 @@ var db *gorm.DB
 
 func openConnection() {
 	var err error
-	if db, err = gorm.Open(
-		"mysql",
-		"root:root@(localhost:8889)/motherbot?charset=utf8mb4&parseTime=True&loc=Local",
-	); err != nil {
-		log.Fatal(err)
+	var data []byte
+	if data, err = ioutil.ReadFile("database.json"); err == nil {
+		config := make(map[string]string)
+		if err = json.Unmarshal(data, &config); err == nil {
+			if db, err = gorm.Open(config["driverName"], config["dataSource"]); err == nil {
+				err = db.AutoMigrate(
+					&BlacklistedUser{},
+					&Conversation{},
+					&MessageLog{},
+					&Mother{},
+				).Error
+			}
+		}
 	}
-	if err = db.AutoMigrate(
-		&BlacklistedUser{},
-		&Conversation{},
-		&MessageLog{},
-		&Mother{},
-	).Error; err != nil {
+	if err != nil {
 		log.Fatal(err)
 	}
 }
