@@ -63,7 +63,7 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 				mom.getMsg("listActiveElement"),
 				mom.getMessageLink(conv.ThreadID),
 				strings.Join(tagged, ", "),
-				int(timeout.Minutes()),
+				timeout.Round(time.Second),
 			)
 			active = append(active, line)
 		}
@@ -420,7 +420,7 @@ func cmdUptime(mom *Mother, params cmdParams) bool {
 			mom.getMsg("listUptimeElement"),
 			name,
 			bot.rtm.GetInfo().User.ID,
-			time.Now().Sub(bot.startedAt),
+			time.Now().Sub(bot.startedAt).Round(time.Second),
 		)
 		uptime = append(uptime, info)
 		return true
