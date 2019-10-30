@@ -2,60 +2,121 @@ package main
 
 import (
 	"encoding/json"
-	"fmt"
-	"github.com/nlopes/slack"
 	"io/ioutil"
 	"log"
+	"os"
+	"path/filepath"
+	"strings"
+	"sync"
 	"time"
+
+	"github.com/nlopes/slack"
 )
 
-type botConfig struct {
-	Name                 string
-	Token                string
-	ChanID               string
-	Enabled              bool
-	SessionTimeout       int64
-	TimeoutCheckInterval int64
-	ThreadsPerPage       int
-	Lang                 map[string]string
-}
+type (
+	botConfig struct {
+		Name                 string
+		Token                string
+		ChanID               string
+		Enabled              bool
+		MaxFileSize          int
+		SessionTimeout       int64
+		TimeoutCheckInterval int64
+		ThreadsPerPage       int
+		Lang                 map[string]string
+	}
 
-type botEvent struct {
-	mom *mother
-	msg slack.RTMEvent
-}
+	blacklistEvent struct {
+		Type    string
+		SlackID string
+	}
 
-type blacklistEvent struct {
-	Type string
-	User string
-}
+	scrubEvent struct {
+		Type string
+	}
+)
 
-type scrubEvent struct {
-	Type string
-}
+var mothers = sync.Map{}
 
-func handleEvents(events <-chan botEvent) {
-	for bot := range events {
-		mom := bot.mom
-		if !mom.online {
-			continue
+func blacklistBots(_, value interface{}) bool {
+	mom := value.(*Mother)
+	if !mom.online {
+		return true
+	}
+	go func(mom *Mother) {
+		// Annoying Slackbot that we can't disable
+		mom.events <- slack.RTMEvent{
+			Type: "blacklist",
+			Data: &blacklistEvent{Type: "blacklist", SlackID: "USLACKBOT"},
 		}
+		// Often it takes a moment for the bot to initialize and recognize its own identity
+		for mom.rtm.GetInfo() == nil {
+			if !mom.online {
+				return
+			}
+			time.Sleep(time.Second)
+		}
+		slackID := mom.rtm.GetInfo().User.ID
+		mothers.Range(func(_, value interface{}) bool {
+			other := value.(*Mother)
+			if other.online {
+				other.events <- slack.RTMEvent{
+					Type: "blacklist",
+					Data: &blacklistEvent{Type: "blacklist", SlackID: slackID},
+				}
+			}
+			return true
+		})
+	}(mom)
+	return true
+}
 
-		switch ev := bot.msg.Data.(type) {
+func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
+	for msg := range events {
+		switch ev := msg.Data.(type) {
+		case *blacklistEvent:
+			mom.blacklistUser(ev.SlackID)
+
+		case *scrubEvent:
+			mom.reapConversations()
+
+		case *slack.ChannelJoinedEvent:
+			handleChannelJoinedEvent(mom, ev)
+
+		case *slack.ConnectedEvent:
+			mom.log.Printf("Infos: %+v\n", *ev.Info)
+			mom.log.Println("Connection counter:", ev.ConnectionCount)
+
+		case *slack.DisconnectedEvent:
+			mom.online = false
+
+		case *slack.GroupJoinedEvent:
+			handleGroupJoinedEvent(mom, ev)
+
+		case *slack.InvalidAuthEvent:
+			mom.log.Println("Invalid credentials")
+			mom.online = false
+			return
+
+		case *slack.MemberJoinedChannelEvent:
+			handleMemberJoinedChannelEvent(mom, ev)
+
+		case *slack.MemberLeftChannelEvent:
+			handleMemberLeftChannelEvent(mom, ev)
+
 		case *slack.MessageEvent:
 			if ev.SubType == "message_replied" {
 				break // Thread update events
 			}
 			edit := ev.SubType == "message_changed"
-			if (edit && mom.isBlacklisted(ev.SubMessage.User)) || mom.isBlacklisted(ev.User) {
+			if mom.isBlacklisted(ev.User) || (edit && mom.isBlacklisted(ev.SubMessage.User)) {
 				break
 			}
-
-			chanInfo := mom.getChannelInfo(ev.Channel)
-			if chanInfo == nil {
+			chanInfo, err := mom.getChannelInfo(ev.Channel)
+			if err != nil {
+				mom.log.Println(err)
 				break
 			}
-
 			if edit {
 				handleMessageChangedEvent(mom, ev, chanInfo)
 			} else if ev.Channel == mom.config.ChanID {
@@ -64,8 +125,9 @@ func handleEvents(events <-chan botEvent) {
 				handleDirectMessageEvent(mom, ev, chanInfo)
 			}
 
-		case *slack.UserTypingEvent:
-			handleUserTypingEvent(mom, ev)
+		case *slack.RateLimitedError:
+			mom.log.Printf("Hitting RTM rate limit; sleeping for %d seconds\n", ev.RetryAfter)
+			time.Sleep(ev.RetryAfter * time.Second)
 
 		case *slack.ReactionAddedEvent:
 			handleReactionAddedEvent(mom, ev)
@@ -73,20 +135,11 @@ func handleEvents(events <-chan botEvent) {
 		case *slack.ReactionRemovedEvent:
 			handleReactionRemovedEvent(mom, ev)
 
-		case *slack.ConnectedEvent:
-			fmt.Println("Infos:", ev.Info)
-			fmt.Println("Connection counter:", ev.ConnectionCount)
+		case *slack.RTMError:
+			mom.log.Println("Error:", ev.Error())
 
-		case *slack.RateLimitedError:
-			mom.log.Println("Hitting RTM rate limit")
-			time.Sleep(ev.RetryAfter * time.Second)
-
-		case *blacklistEvent:
-			mom.blacklistUser(ev.User)
-
-		case *scrubEvent:
-			mom.reapConversations(mom.config.SessionTimeout)
-			delete(mom.chanInfo, mom.config.ChanID)
+		case *slack.UserTypingEvent:
+			handleUserTypingEvent(mom, ev)
 
 		default:
 			// Ignore other events..
@@ -94,80 +147,79 @@ func handleEvents(events <-chan botEvent) {
 	}
 }
 
-func main() {
-	var bc []botConfig
-
-	data, err := ioutil.ReadFile("config.json")
+func loadBot(configFile os.FileInfo) bool {
+	var config botConfig
+	ext := filepath.Ext(configFile.Name())
+	if configFile.IsDir() || ext != ".json" {
+		return false
+	}
+	path := filepath.Join("bot_config", configFile.Name())
+	data, err := ioutil.ReadFile(path)
 	if err != nil {
 		log.Fatal(err)
 	}
-	err = json.Unmarshal(data, &bc)
-
-	if err := openConnection("mother.db"); err != nil {
+	if err := json.Unmarshal(data, &config); err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
-
-	events := make(chan botEvent)
-	defer close(events)
-
-	mothers := make([]*mother, 0)
-	for _, config := range bc {
-		if !config.Enabled {
-			continue
-		}
-		mom := newMother(config)
-		mothers = append(mothers, mom)
-
-		go func(mom *mother) {
-			for msg := range mom.rtm.IncomingEvents {
-				if !mom.online {
-					break
-				}
-				events <- botEvent{
-					mom: mom,
-					msg: msg,
-				}
-			}
-		}(mom)
-
-		go func(mom *mother) {
+	config.Name = strings.TrimSuffix(configFile.Name(), ext)
+	if !config.Enabled {
+		log.Println(config.Name, "is not enabled")
+		return false
+	}
+	mom := getMother(config)
+	mothers.Store(config.Name, mom)
+	go func(mom *Mother) {
+		defer close(mom.events)
+		// To handle each bot's events synchronously
+		go handleEvents(mom, mom.events)
+		// Queues event to perform conversation reaping every TimeoutCheckInterval
+		go func(mom *Mother) {
 			for mom.online {
-				time.Sleep(time.Duration(int64(time.Second) * mom.config.TimeoutCheckInterval))
-				events <- botEvent{
-					mom: mom,
-					msg: slack.RTMEvent{
-						Type: "scrub",
-						Data: &scrubEvent{
-							Type: "scrub",
-						},
-					},
+				mom.events <- slack.RTMEvent{
+					Type: "scrub",
+					Data: &scrubEvent{Type: "scrub"},
 				}
+				time.Sleep(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
 			}
 		}(mom)
-	}
-
-	// Builds blacklist of bots in action and automatically adds them
-	for _, mom := range mothers {
-		go func(mom *mother) {
-			mom.blacklistUser("USLACKBOT")
-			for mom.rtm.GetInfo() == nil {
-				time.Sleep(time.Second)
+		// Forwards events from Slack API library to allow us to mix in our own events
+		for msg := range mom.rtm.IncomingEvents {
+			if !mom.online {
+				break
 			}
-			for _, otherMom := range mothers {
-				events <- botEvent{
-					mom: otherMom,
-					msg: slack.RTMEvent{
-						Type: "blacklist",
-						Data: &blacklistEvent{
-							Type: "blacklist",
-							User: mom.rtm.GetInfo().User.ID,
-						},
-					},
-				}
-			}
-		}(mom)
-	}
+			mom.events <- msg
+		}
+	}(mom)
+	return true
+}
 
-	handleEvents(events)
+func main() {
+	initCommands()
+	openConnection()
+	defer db.Close()
+	// Attempt to load all json configuration files in "./bot_config"
+	files, err := ioutil.ReadDir("bot_config")
+	if err != nil {
+		log.Fatal(err)
+	}
+	for _, configFile := range files {
+		loadBot(configFile)
+	}
+	// We need the bots to blacklist each other to avoid potentially looping messages
+	mothers.Range(blacklistBots)
+	// Keep application alive until all bots are offline
+	for {
+		alive := 0
+		mothers.Range(func(_, value interface{}) bool {
+			mom := value.(*Mother)
+			if mom.online {
+				alive++
+			}
+			return true
+		})
+		if alive == 0 {
+			break
+		}
+		time.Sleep(10 * time.Second)
+	}
 }
