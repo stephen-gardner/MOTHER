@@ -37,6 +37,7 @@ func initCommands() {
 	commands["reload"] = cmdReload
 	commands["resume"] = cmdResume
 	commands["unload"] = cmdUnload
+	commands["uptime"] = cmdUptime
 }
 
 func getSlackID(tagged string) string {
@@ -49,7 +50,7 @@ func getSlackID(tagged string) string {
 }
 
 func cmdActive(mom *Mother, params cmdParams) bool {
-	threadList := make([]string, 0)
+	active := []string{mom.getMsg("listActive")}
 	for _, conv := range mom.Conversations {
 		if conv.active {
 			tagged := make([]string, 0)
@@ -64,15 +65,13 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 				strings.Join(tagged, ", "),
 				int(timeout.Minutes()),
 			)
-			threadList = append(threadList, line)
+			active = append(active, line)
 		}
 	}
-	out := mom.getMsg("listActive")
-	if len(threadList) == 0 {
-		out += mom.getMsg("listNone")
-	} else {
-		out += strings.Join(threadList, "\n")
+	if len(active) == 1 {
+		active = append(active, mom.getMsg("listNone"))
 	}
+	out := strings.Join(active, "\n")
 	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
 }
@@ -191,7 +190,9 @@ func cmdHelp(mom *Mother, params cmdParams) bool {
 		help := make([]string, 0)
 		for cmd := range commands {
 			key := "cmdHelp" + strings.ToUpper(cmd[0:1]) + cmd[1:]
-			help = append(help, mom.getMsg(key))
+			if lang := mom.getMsg(key); lang != "" {
+				help = append(help, lang)
+			}
 		}
 		sort.Strings(help)
 		out = mom.getMsg("cmdHelp") + strings.Join(help, "\n")
@@ -406,5 +407,25 @@ func cmdUnload(mom *Mother, params cmdParams) bool {
 		unload.log.Println(err)
 	}
 	mothers.Delete(botName)
+	return true
+}
+
+// Display information about how long each bot has been active
+func cmdUptime(mom *Mother, params cmdParams) bool {
+	uptime := []string{mom.getMsg("listUptime")}
+	mothers.Range(func(key, value interface{}) bool {
+		name := key.(string)
+		bot := value.(*Mother)
+		info := fmt.Sprintf(
+			mom.getMsg("listUptimeElement"),
+			name,
+			bot.rtm.GetInfo().User.ID,
+			time.Now().Sub(bot.startedAt),
+		)
+		uptime = append(uptime, info)
+		return true
+	})
+	out := strings.Join(uptime, "\n")
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
 }

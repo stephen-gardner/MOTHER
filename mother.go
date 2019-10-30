@@ -25,6 +25,7 @@ type (
 		chanInfo         map[string]*slack.Channel `gorm:"-"`
 		usersInfo        map[string]*slack.User    `gorm:"-"`
 		invited          []string                  `gorm:"-"`
+		startedAt        time.Time                 `gorm:"-"`
 		online           bool                      `gorm:"-"`
 	}
 
@@ -48,6 +49,7 @@ func getMother(config botConfig) *Mother {
 		chanInfo:  make(map[string]*slack.Channel),
 		usersInfo: make(map[string]*slack.User),
 		invited:   make([]string, 0),
+		startedAt: time.Now(),
 		online:    true,
 	}
 	// Load conversations that should still be active
