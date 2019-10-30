@@ -1,4 +1,5 @@
 {
   "driverName": "mysql",
-  "dataSource": "root:root@(localhost:8889)/motherbot?charset=utf8mb4&parseTime=True&loc=Local"
+  "dataSource": "root:root@(localhost:8889)/motherbot?charset=utf8mb4&parseTime=True&loc=Local",
+  "timeout": "5"
 }

@@ -147,11 +147,11 @@ func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
 	}
 }
 
-func loadBot(configFile os.FileInfo) {
+func loadBot(configFile os.FileInfo) bool {
 	var config botConfig
 	ext := filepath.Ext(configFile.Name())
 	if configFile.IsDir() || ext != ".json" {
-		return
+		return false
 	}
 	path := filepath.Join("bot_config", configFile.Name())
 	data, err := ioutil.ReadFile(path)
@@ -164,7 +164,7 @@ func loadBot(configFile os.FileInfo) {
 	config.Name = strings.TrimSuffix(configFile.Name(), ext)
 	if !config.Enabled {
 		log.Println(config.Name, "is not enabled")
-		return
+		return false
 	}
 	mom := getMother(config)
 	mothers.Store(config.Name, mom)
@@ -190,6 +190,7 @@ func loadBot(configFile os.FileInfo) {
 			mom.events <- msg
 		}
 	}(mom)
+	return true
 }
 
 func main() {
@@ -219,6 +220,6 @@ func main() {
 		if alive == 0 {
 			break
 		}
-		time.Sleep(time.Minute)
+		time.Sleep(10 * time.Second)
 	}
 }

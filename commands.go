@@ -3,6 +3,8 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -30,8 +32,11 @@ func initCommands() {
 	commands["contact"] = cmdContact
 	commands["help"] = cmdHelp
 	commands["invite"] = cmdInvite
+	commands["load"] = cmdLoad
 	commands["logs"] = cmdLogs
+	commands["reload"] = cmdReload
 	commands["resume"] = cmdResume
+	commands["unload"] = cmdUnload
 }
 
 func getSlackID(tagged string) string {
@@ -51,11 +56,13 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 			for _, slackID := range strings.Split(conv.SlackIDs, ",") {
 				tagged = append(tagged, fmt.Sprintf("<@%s>", slackID))
 			}
+			timeout := time.Duration(mom.config.SessionTimeout) * time.Second
+			timeout -= time.Now().Sub(conv.UpdatedAt)
 			line := fmt.Sprintf(
 				mom.getMsg("listActiveElement"),
 				mom.getMessageLink(conv.ThreadID),
 				strings.Join(tagged, ", "),
-				int((time.Duration(mom.config.SessionTimeout)*time.Second)-time.Now().Sub(conv.UpdatedAt)),
+				int(timeout.Minutes()),
 			)
 			threadList = append(threadList, line)
 		}
@@ -340,5 +347,64 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 		mom.log.Println(err)
 		return false
 	}
+	return true
+}
+
+// Loads bot with given name
+func cmdLoad(mom *Mother, params cmdParams) bool {
+	if len(params.args) == 0 {
+		return false
+	}
+	botName := params.args[0]
+	if _, present := mothers.Load(botName); present {
+		return false
+	}
+	path := filepath.Join("bot_config", botName+".json")
+	configFile, err := os.Stat(path)
+	if err != nil {
+		mom.log.Println(err)
+		return false
+	}
+	return loadBot(configFile)
+}
+
+// Reloads bot with updated configuration
+func cmdReload(mom *Mother, _ cmdParams) bool {
+	path := filepath.Join("bot_config", mom.Name) + ".json"
+	configFile, err := os.Stat(path)
+	if err != nil {
+		mom.log.Println(err)
+		return false
+	}
+	if err := mom.rtm.Disconnect(); err != nil {
+		mom.log.Println(err)
+		return false
+	}
+	go func(mom *Mother, configFile os.FileInfo) {
+		for mom.online {
+			time.Sleep(time.Second)
+		}
+		loadBot(configFile)
+	}(mom, configFile)
+	return true
+}
+
+// Unloads bot with given name
+func cmdUnload(mom *Mother, params cmdParams) bool {
+	var botName string
+	if len(params.args) == 0 {
+		botName = mom.Name
+	} else {
+		botName = params.args[0]
+	}
+	bot, present := mothers.Load(botName)
+	if !present {
+		return false
+	}
+	unload := bot.(*Mother)
+	if err := unload.rtm.Disconnect(); err != nil {
+		unload.log.Println(err)
+	}
+	mothers.Delete(botName)
 	return true
 }
