@@ -416,12 +416,14 @@ func cmdUptime(mom *Mother, params cmdParams) bool {
 	mothers.Range(func(key, value interface{}) bool {
 		name := key.(string)
 		bot := value.(*Mother)
-		info := fmt.Sprintf(
-			mom.getMsg("listUptimeElement"),
-			name,
-			bot.rtm.GetInfo().User.ID,
-			time.Now().Sub(bot.startedAt).Round(time.Second),
-		)
+		msg := ""
+		// Can't tag bots located in different workspaces
+		if mom.rtm.GetInfo().Team.ID == bot.rtm.GetInfo().Team.ID {
+			msg = mom.getMsg("listUptimeElement")
+		} else {
+			msg = mom.getMsg("listUptimeForeignElement")
+		}
+		info := fmt.Sprintf(msg, name, bot.rtm.GetInfo().User.ID, time.Now().Sub(bot.startedAt).Round(time.Second))
 		uptime = append(uptime, info)
 		return true
 	})

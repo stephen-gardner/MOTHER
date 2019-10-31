@@ -25,6 +25,7 @@
     "listNone": ">_(None)_",
     "listUptime": "*Bot Uptime:*",
     "listUptimeElement": ">*%s* (<@%s>) _%s_",
+    "listUptimeForeignElement": ">*%s* (ID: %s) _%s_",
     "logMsg": "[%s] %s: %s\n",
     "logMsgEdited": "[%s] %s: %s (edited)\n",
     "logThread": ">> Session %s <<\n",

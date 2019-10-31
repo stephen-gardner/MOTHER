@@ -56,15 +56,27 @@ func blacklistBots(_, value interface{}) bool {
 			}
 			time.Sleep(time.Second)
 		}
-		slackID := mom.rtm.GetInfo().User.ID
 		mothers.Range(func(_, value interface{}) bool {
 			other := value.(*Mother)
-			if other.online {
+			if !other.online {
+				return true
+			}
+			go func(mom, other *Mother) {
+				for other.rtm.GetInfo() == nil {
+					if !other.online {
+						return
+					}
+					time.Sleep(time.Second)
+				}
+				// Only blacklist bots located in the same workspace
+				if other.rtm.GetInfo().Team.ID != mom.rtm.GetInfo().Team.ID {
+					return
+				}
 				other.events <- slack.RTMEvent{
 					Type: "blacklist",
-					Data: &blacklistEvent{Type: "blacklist", SlackID: slackID},
+					Data: &blacklistEvent{Type: "blacklist", SlackID: mom.rtm.GetInfo().User.ID},
 				}
-			}
+			}(mom, other)
 			return true
 		})
 	}(mom)
