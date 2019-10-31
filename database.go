@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"io/ioutil"
 	"log"
+	"strconv"
+	"time"
 
 	"github.com/jinzhu/gorm"
 	_ "github.com/jinzhu/gorm/dialects/mysql"
@@ -18,7 +20,10 @@ func openConnection() {
 		config := make(map[string]string)
 		if err = json.Unmarshal(data, &config); err == nil {
 			if db, err = gorm.Open(config["driverName"], config["dataSource"]); err == nil {
-				db.DB().SetMaxIdleConns(0)
+				connMaxLifetime, _ := strconv.Atoi(config["connMaxLifetime"])
+				maxIdleConns, _ := strconv.Atoi(config["maxIdleConns"])
+				db.DB().SetConnMaxLifetime(time.Minute * time.Duration(connMaxLifetime))
+				db.DB().SetMaxIdleConns(maxIdleConns)
 				err = db.AutoMigrate(
 					&BlacklistedUser{},
 					&Conversation{},
@@ -28,6 +33,7 @@ func openConnection() {
 			}
 		}
 	}
+
 	if err != nil {
 		log.Fatal(err)
 	}

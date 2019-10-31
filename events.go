@@ -18,6 +18,14 @@ func handleChannelJoinedEvent(mom *Mother, ev *slack.ChannelJoinedEvent) {
 }
 
 func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent) {
+	userInfo, err := mom.getUserInfo(ev.User)
+	if err != nil {
+		mom.log.Println(err)
+		return
+	}
+	if userInfo.IsBot {
+		return
+	}
 	var conv *Conversation
 	if ev.ThreadTimestamp != "" {
 		conv = mom.findConversationByTimestamp(ev.ThreadTimestamp, true)
@@ -48,7 +56,7 @@ func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent) {
 		return
 	}
 	if ev.Text != "" && ev.Text[0] == '!' {
-		mom.runCommand(ev)
+		mom.runCommand(ev, true)
 	}
 }
 
@@ -58,7 +66,10 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *sla
 	userInfo, err := mom.getUserInfo(ev.User)
 	if err != nil {
 		mom.log.Println(err)
-		err = nil
+		return
+	}
+	if userInfo.IsBot {
+		return
 	}
 	if ev.Text != "" && ev.Text[0] == '!' {
 		isCommand = true
@@ -77,7 +88,7 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *sla
 	}
 	if executeCommand {
 		if isCommand && (userInfo.IsAdmin || mom.hasMember(ev.User)) {
-			mom.runCommand(ev)
+			mom.runCommand(ev, false)
 		} else {
 			chanInfo, err := mom.getChannelInfo(mom.config.ChanID)
 			if err != nil {

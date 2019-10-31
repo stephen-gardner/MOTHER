@@ -91,6 +91,7 @@ func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
 
 		case *scrubEvent:
 			mom.reapConversations()
+			mom.spoofAvailability()
 
 		case *slack.ChannelJoinedEvent:
 			handleChannelJoinedEvent(mom, ev)

@@ -82,6 +82,7 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		for _, bu := range mom.BlacklistedUsers {
 			tagged = append(tagged, fmt.Sprintf("<@%s>", bu.SlackID))
 		}
+		sort.Strings(tagged) // It won't be alphabetical, but at least keeps the list order consistent
 		msg := mom.getMsg("listBlacklisted") + strings.Join(tagged, ", ")
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
@@ -366,7 +367,11 @@ func cmdLoad(mom *Mother, params cmdParams) bool {
 		mom.log.Println(err)
 		return false
 	}
-	return loadBot(configFile)
+	res := loadBot(configFile)
+	if res {
+		mothers.Range(blacklistBots)
+	}
+	return res
 }
 
 // Reloads bot with updated configuration
@@ -385,7 +390,9 @@ func cmdReload(mom *Mother, _ cmdParams) bool {
 		for mom.online {
 			time.Sleep(time.Second)
 		}
-		loadBot(configFile)
+		if loadBot(configFile) {
+			mothers.Range(blacklistBots)
+		}
 	}(mom, configFile)
 	return true
 }

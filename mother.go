@@ -395,7 +395,7 @@ func (mom *Mother) postMessage(chanID, threadID, msg string) (string, error) {
 	return timestamp, err
 }
 
-func (mom *Mother) runCommand(ev *slack.MessageEvent) {
+func (mom *Mother) runCommand(ev *slack.MessageEvent, forceThreading bool) {
 	var reaction, threadID string
 	args := strings.Split(ev.Text, " ")
 	cmdName := strings.ToLower(args[0][1:])
@@ -407,7 +407,7 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent) {
 		}
 		return
 	}
-	if ev.ThreadTimestamp == "" {
+	if ev.ThreadTimestamp == "" && forceThreading {
 		threadID = ev.Timestamp
 	} else {
 		threadID = ev.ThreadTimestamp
@@ -429,6 +429,14 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent) {
 	if err := mom.rtm.AddReaction(reaction, ref); err != nil {
 		mom.log.Println(err)
 	}
+}
+
+func (mom *Mother) spoofAvailability() {
+	dummy, _, _, err := mom.rtm.OpenConversation(&slack.OpenConversationParameters{Users: []string{"USLACKBOT"}})
+	if err != nil {
+		mom.log.Println(err)
+	}
+	mom.rtm.SendMessage(mom.rtm.NewTypingMessage(dummy.ID))
 }
 
 func (mom *Mother) getMsg(key string) string {
