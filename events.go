@@ -56,7 +56,7 @@ func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent) {
 		return
 	}
 	if ev.Text != "" && ev.Text[0] == '!' {
-		mom.runCommand(ev, true)
+		mom.runCommand(userInfo, ev, true)
 	}
 }
 
@@ -88,7 +88,7 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *sla
 	}
 	if executeCommand {
 		if isCommand && (userInfo.IsAdmin || mom.hasMember(ev.User)) {
-			mom.runCommand(ev, false)
+			mom.runCommand(userInfo, ev, false)
 		} else {
 			chanInfo, err := mom.getChannelInfo(mom.config.ChanID)
 			if err != nil {

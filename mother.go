@@ -37,7 +37,7 @@ type (
 )
 
 func getMother(config botConfig) *Mother {
-	logger := log.New(os.Stdout, config.Name+": ", log.Lshortfile|log.LstdFlags)
+	logger := log.New(os.Stdout, config.Name+": ", log.LstdFlags)
 	rtm := slack.New(config.Token, slack.OptionDebug(false), slack.OptionLog(logger)).NewRTM()
 	go rtm.ManageConnection()
 	mom := &Mother{
@@ -395,7 +395,7 @@ func (mom *Mother) postMessage(chanID, threadID, msg string) (string, error) {
 	return timestamp, err
 }
 
-func (mom *Mother) runCommand(ev *slack.MessageEvent, forceThreading bool) {
+func (mom *Mother) runCommand(userInfo *slack.User, ev *slack.MessageEvent, forceThreading bool) {
 	var reaction, threadID string
 	args := strings.Split(ev.Text, " ")
 	cmdName := strings.ToLower(args[0][1:])
@@ -423,6 +423,7 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent, forceThreading bool) {
 	)
 	if success {
 		reaction = mom.getMsg("reactSuccess")
+		mom.log.Printf("<%s> %s\n", userInfo.Profile.DisplayName, ev.Text)
 	} else {
 		reaction = mom.getMsg("reactFailure")
 	}
