@@ -382,6 +382,7 @@ func cmdReload(mom *Mother, _ cmdParams) bool {
 		mom.log.Println(err)
 		return false
 	}
+	mom.reload = true
 	if err := mom.rtm.Disconnect(); err != nil {
 		mom.log.Println(err)
 		return false
@@ -410,10 +411,12 @@ func cmdUnload(mom *Mother, params cmdParams) bool {
 		return false
 	}
 	unload := bot.(*Mother)
-	if err := unload.rtm.Disconnect(); err != nil {
-		unload.log.Println(err)
-	}
-	mothers.Delete(botName)
+	go func(unload *Mother) {
+		unload.events <- slack.RTMEvent{
+			Type: "shutdown",
+			Data: &shutdownEvent{Type: "shutdown"},
+		}
+	}(unload)
 	return true
 }
 
@@ -430,7 +433,13 @@ func cmdUptime(mom *Mother, params cmdParams) bool {
 		} else {
 			msg = mom.getMsg("listUptimeForeignElement")
 		}
-		info := fmt.Sprintf(msg, name, bot.rtm.GetInfo().User.ID, time.Now().Sub(bot.startedAt).Round(time.Second))
+		duration := ""
+		if bot.online {
+			duration = time.Now().Sub(bot.startedAt).Round(time.Second).String()
+		} else {
+			duration = "Offline"
+		}
+		info := fmt.Sprintf(msg, name, bot.rtm.GetInfo().User.ID, duration)
 		uptime = append(uptime, info)
 		return true
 	})

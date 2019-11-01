@@ -43,15 +43,7 @@ func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slac
 }
 
 func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack.User, chanInfo *slack.Channel) {
-	isCommand := false
-	executeCommand := false
-	if ev.Text != "" && ev.Text[0] == '!' {
-		isCommand = true
-	}
-	// Always accept commands from channel members or workspace admins
-	if isCommand && (sender.IsAdmin || mom.hasMember(sender.ID)) {
-		executeCommand = true
-	}
+	hasMember := false
 	// Cannot do anything with blacklisted user present
 	for _, userID := range chanInfo.Members {
 		if mom.isBlacklisted(userID) {
@@ -59,18 +51,23 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 			mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 			return
 		}
-	}
-	if executeCommand {
-		if isCommand && (sender.IsAdmin || mom.hasMember(ev.User)) {
-			mom.runCommand(ev, sender, false)
-		} else {
-			memberChanInfo, err := mom.getChannelInfo(mom.config.ChanID)
-			if err != nil {
-				mom.log.Println(err)
-			}
-			msg := fmt.Sprintf(mom.getMsg("inConvChannel"), memberChanInfo.Name)
-			mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
+		if mom.hasMember(userID) {
+			hasMember = true
 		}
+	}
+	// Accept commands from channel members or workspace admins
+	if ev.Text != "" && ev.Text[0] == '!' && (sender.IsAdmin || mom.hasMember(sender.ID)) {
+		mom.runCommand(ev, sender, false)
+		return
+	}
+	// Conversations cannot be held if a channel member is present
+	if hasMember {
+		memberChanInfo, err := mom.getChannelInfo(mom.config.ChanID)
+		if err != nil {
+			mom.log.Println(err)
+		}
+		msg := fmt.Sprintf(mom.getMsg("inConvChannel"), memberChanInfo.Name)
+		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 		return
 	}
 

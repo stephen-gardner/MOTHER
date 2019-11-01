@@ -27,6 +27,7 @@ type (
 		invited          []string                  `gorm:"-"`
 		startedAt        time.Time                 `gorm:"-"`
 		online           bool                      `gorm:"-"`
+		reload           bool                      `gorm:"-"`
 	}
 
 	BlacklistedUser struct {
@@ -51,6 +52,7 @@ func getMother(config botConfig) *Mother {
 		invited:   make([]string, 0),
 		startedAt: time.Now(),
 		online:    true,
+		reload:    false,
 	}
 	// Load conversations that should still be active
 	updateThreshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))

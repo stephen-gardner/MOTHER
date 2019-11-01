@@ -34,6 +34,10 @@ type (
 	scrubEvent struct {
 		Type string
 	}
+
+	shutdownEvent struct {
+		Type string
+	}
 )
 
 var mothers = sync.Map{}
@@ -92,6 +96,12 @@ func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
 		case *scrubEvent:
 			mom.reapConversations()
 			mom.spoofAvailability()
+
+		case *shutdownEvent:
+			mothers.Delete(mom.Name)
+			if err := mom.rtm.Disconnect(); err != nil {
+				mom.log.Println(err)
+			}
 
 		case *slack.ChannelJoinedEvent:
 			handleChannelJoinedEvent(mom, ev)
@@ -205,15 +215,17 @@ func main() {
 	mothers.Range(blacklistBots)
 	// Keep application alive until all bots are offline
 	for {
-		alive := 0
+		loaded := 0
 		mothers.Range(func(_, value interface{}) bool {
 			mom := value.(*Mother)
-			if mom.online {
-				alive++
+			if !mom.online && !mom.reload {
+				mom.rtm = slack.New(mom.config.Token, slack.OptionDebug(false), slack.OptionLog(mom.log)).NewRTM()
+				go mom.rtm.ManageConnection()
 			}
+			loaded++
 			return true
 		})
-		if alive == 0 {
+		if loaded == 0 {
 			break
 		}
 		time.Sleep(10 * time.Second)
