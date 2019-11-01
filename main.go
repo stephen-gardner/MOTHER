@@ -101,6 +101,7 @@ func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
 			mom.log.Println("Connection counter:", ev.ConnectionCount)
 
 		case *slack.DisconnectedEvent:
+			mom.log.Println("Disconnected...")
 			mom.online = false
 
 		case *slack.GroupJoinedEvent:
@@ -118,25 +119,7 @@ func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
 			handleMemberLeftChannelEvent(mom, ev)
 
 		case *slack.MessageEvent:
-			if ev.SubType == "message_replied" {
-				break // Thread update events
-			}
-			edit := ev.SubType == "message_changed"
-			if mom.isBlacklisted(ev.User) || (edit && mom.isBlacklisted(ev.SubMessage.User)) {
-				break
-			}
-			chanInfo, err := mom.getChannelInfo(ev.Channel)
-			if err != nil {
-				mom.log.Println(err)
-				break
-			}
-			if edit {
-				handleMessageChangedEvent(mom, ev, chanInfo)
-			} else if ev.Channel == mom.config.ChanID {
-				handleChannelMessageEvent(mom, ev)
-			} else if chanInfo.IsIM || chanInfo.IsMpIM {
-				handleDirectMessageEvent(mom, ev, chanInfo)
-			}
+			handleMessageEvent(mom, ev)
 
 		case *slack.RateLimitedError:
 			mom.log.Printf("Hitting RTM rate limit; sleeping for %d seconds\n", ev.RetryAfter)

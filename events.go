@@ -7,25 +7,7 @@ import (
 	"github.com/nlopes/slack"
 )
 
-// Leave random public channels that bot gets invited into
-func handleChannelJoinedEvent(mom *Mother, ev *slack.ChannelJoinedEvent) {
-	if ev.Channel.ID == mom.config.ChanID {
-		return
-	}
-	if _, err := mom.rtm.LeaveChannel(ev.Channel.ID); err != nil {
-		mom.log.Println(err)
-	}
-}
-
-func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent) {
-	userInfo, err := mom.getUserInfo(ev.User)
-	if err != nil {
-		mom.log.Println(err)
-		return
-	}
-	if userInfo.IsBot {
-		return
-	}
+func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack.User) {
 	var conv *Conversation
 	if ev.ThreadTimestamp != "" {
 		conv = mom.findConversationByTimestamp(ev.ThreadTimestamp, true)
@@ -56,51 +38,44 @@ func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent) {
 		return
 	}
 	if ev.Text != "" && ev.Text[0] == '!' {
-		mom.runCommand(userInfo, ev, true)
+		mom.runCommand(ev, sender, true)
 	}
 }
 
-func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *slack.Channel) {
+func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack.User, chanInfo *slack.Channel) {
 	isCommand := false
 	executeCommand := false
-	userInfo, err := mom.getUserInfo(ev.User)
-	if err != nil {
-		mom.log.Println(err)
-		return
-	}
-	if userInfo.IsBot {
-		return
-	}
 	if ev.Text != "" && ev.Text[0] == '!' {
 		isCommand = true
 	}
+	// Always accept commands from channel members or workspace admins
+	if isCommand && (sender.IsAdmin || mom.hasMember(sender.ID)) {
+		executeCommand = true
+	}
+	// Cannot do anything with blacklisted user present
 	for _, userID := range chanInfo.Members {
-		// Cannot do anything with blacklisted user present
 		if mom.isBlacklisted(userID) {
 			msg := fmt.Sprintf(mom.getMsg("blacklistedUser"), userID)
 			mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 			return
 		}
-		// If conversation contains a channel executeCommand, direct message must be a executeCommand from a executeCommand
-		if !executeCommand && ((isCommand && userInfo.IsAdmin) || mom.hasMember(userID)) {
-			executeCommand = true
-		}
 	}
 	if executeCommand {
-		if isCommand && (userInfo.IsAdmin || mom.hasMember(ev.User)) {
-			mom.runCommand(userInfo, ev, false)
+		if isCommand && (sender.IsAdmin || mom.hasMember(ev.User)) {
+			mom.runCommand(ev, sender, false)
 		} else {
-			chanInfo, err := mom.getChannelInfo(mom.config.ChanID)
+			memberChanInfo, err := mom.getChannelInfo(mom.config.ChanID)
 			if err != nil {
 				mom.log.Println(err)
 			}
-			msg := fmt.Sprintf(mom.getMsg("inConvChannel"), chanInfo.Name)
+			msg := fmt.Sprintf(mom.getMsg("inConvChannel"), memberChanInfo.Name)
 			mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 		}
 		return
 	}
 
 	var convTimestamp string
+	var err error
 	conv := mom.findConversationByChannel(ev.Channel)
 	if conv == nil {
 		if conv, err = mom.createConversation(ev.Channel, chanInfo.Members, true); err != nil {
@@ -128,6 +103,61 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *sla
 		if err := conv.mirrorAttachment(attach, entry, true); err != nil {
 			mom.log.Println(err)
 		}
+	}
+}
+
+// Forward edits of active conversation's messages between direct messages and conversation threads
+func handleMessageChangedEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *slack.Channel) {
+	if conv := mom.findConversationByTimestamp(ev.SubMessage.Timestamp, false); conv != nil {
+		conv.mirrorEdit(
+			ev.SubMessage.User,
+			ev.SubMessage.Timestamp,
+			ev.SubMessage.Text,
+			chanInfo.IsIM || chanInfo.IsMpIM,
+		)
+	}
+}
+
+func handleMessageEvent(mom *Mother, ev *slack.MessageEvent) {
+	if ev.SubType == "message_replied" {
+		return // Thread update events
+	}
+	var sender *slack.User
+	var err error
+	edit := ev.SubType == "message_changed"
+	if edit {
+		sender, err = mom.getUserInfo(ev.SubMessage.User)
+	} else {
+		sender, err = mom.getUserInfo(ev.User)
+	}
+	if err != nil {
+		mom.log.Println(err)
+		return
+	}
+	if sender.IsBot || mom.isBlacklisted(sender.ID) {
+		return
+	}
+	chanInfo, err := mom.getChannelInfo(ev.Channel)
+	if err != nil {
+		mom.log.Println(err)
+		return
+	}
+	if edit {
+		handleMessageChangedEvent(mom, ev, chanInfo)
+	} else if ev.Channel == mom.config.ChanID {
+		handleChannelMessageEvent(mom, ev, sender)
+	} else if chanInfo.IsIM || chanInfo.IsMpIM {
+		handleDirectMessageEvent(mom, ev, sender, chanInfo)
+	}
+}
+
+// Leave random public channels that bot gets invited into
+func handleChannelJoinedEvent(mom *Mother, ev *slack.ChannelJoinedEvent) {
+	if ev.Channel.ID == mom.config.ChanID {
+		return
+	}
+	if _, err := mom.rtm.LeaveChannel(ev.Channel.ID); err != nil {
+		mom.log.Println(err)
 	}
 }
 
@@ -189,13 +219,6 @@ func handleMemberLeftChannelEvent(mom *Mother, ev *slack.MemberLeftChannelEvent)
 			chanInfo.Members = append(chanInfo.Members[:i], chanInfo.Members[i+1:]...)
 			return
 		}
-	}
-}
-
-// Forward edits of active conversation's messages between direct messages and conversation threads
-func handleMessageChangedEvent(mom *Mother, ev *slack.MessageEvent, chanInfo *slack.Channel) {
-	if conv := mom.findConversationByTimestamp(ev.SubMessage.Timestamp, false); conv != nil {
-		conv.mirrorEdit(ev.SubMessage.User, ev.SubMessage.Timestamp, ev.SubMessage.Text, chanInfo.IsIM || chanInfo.IsMpIM)
 	}
 }
 
