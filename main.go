@@ -13,32 +13,16 @@ import (
 	"github.com/nlopes/slack"
 )
 
-type (
-	botConfig struct {
-		Name                 string
-		Token                string
-		ChanID               string
-		Enabled              bool
-		MaxFileSize          int
-		SessionTimeout       int64
-		TimeoutCheckInterval int64
-		ThreadsPerPage       int
-		Lang                 map[string]string
-	}
-
-	blacklistEvent struct {
-		Type    string
-		SlackID string
-	}
-
-	scrubEvent struct {
-		Type string
-	}
-
-	shutdownEvent struct {
-		Type string
-	}
-)
+type botConfig struct {
+	Token                string
+	ChanID               string
+	Enabled              bool
+	MaxFileSize          int
+	SessionTimeout       int64
+	TimeoutCheckInterval int64
+	ThreadsPerPage       int
+	Lang                 map[string]string
+}
 
 var mothers = sync.Map{}
 
@@ -87,72 +71,6 @@ func blacklistBots(_, value interface{}) bool {
 	return true
 }
 
-func handleEvents(mom *Mother, events <-chan slack.RTMEvent) {
-	for msg := range events {
-		switch ev := msg.Data.(type) {
-		case *blacklistEvent:
-			mom.blacklistUser(ev.SlackID)
-
-		case *scrubEvent:
-			mom.reapConversations()
-			mom.spoofAvailability()
-
-		case *shutdownEvent:
-			mothers.Delete(mom.Name)
-			if err := mom.rtm.Disconnect(); err != nil {
-				mom.log.Println(err)
-			}
-
-		case *slack.ChannelJoinedEvent:
-			handleChannelJoinedEvent(mom, ev)
-
-		case *slack.ConnectedEvent:
-			mom.log.Printf("Infos: %+v\n", *ev.Info)
-			mom.log.Println("Connection counter:", ev.ConnectionCount)
-
-		case *slack.DisconnectedEvent:
-			mom.log.Println("Disconnected...")
-			mom.online = false
-
-		case *slack.GroupJoinedEvent:
-			handleGroupJoinedEvent(mom, ev)
-
-		case *slack.InvalidAuthEvent:
-			mom.log.Println("Invalid credentials")
-			mom.online = false
-			return
-
-		case *slack.MemberJoinedChannelEvent:
-			handleMemberJoinedChannelEvent(mom, ev)
-
-		case *slack.MemberLeftChannelEvent:
-			handleMemberLeftChannelEvent(mom, ev)
-
-		case *slack.MessageEvent:
-			handleMessageEvent(mom, ev)
-
-		case *slack.RateLimitedError:
-			mom.log.Printf("Hitting RTM rate limit; sleeping for %d seconds\n", ev.RetryAfter)
-			time.Sleep(ev.RetryAfter * time.Second)
-
-		case *slack.ReactionAddedEvent:
-			handleReactionAddedEvent(mom, ev)
-
-		case *slack.ReactionRemovedEvent:
-			handleReactionRemovedEvent(mom, ev)
-
-		case *slack.RTMError:
-			mom.log.Println("Error:", ev.Error())
-
-		case *slack.UserTypingEvent:
-			handleUserTypingEvent(mom, ev)
-
-		default:
-			// Ignore other events..
-		}
-	}
-}
-
 func loadBot(configFile os.FileInfo) bool {
 	var config botConfig
 	ext := filepath.Ext(configFile.Name())
@@ -162,40 +80,25 @@ func loadBot(configFile os.FileInfo) bool {
 	path := filepath.Join("bot_config", configFile.Name())
 	data, err := ioutil.ReadFile(path)
 	if err != nil {
-		log.Fatal(err)
-	}
-	if err := json.Unmarshal(data, &config); err != nil {
-		log.Fatal(err)
-	}
-	config.Name = strings.TrimSuffix(configFile.Name(), ext)
-	if !config.Enabled {
-		log.Println(config.Name, "is not enabled")
+		log.Println(err)
 		return false
 	}
-	mom := getMother(config)
-	mothers.Store(config.Name, mom)
-	go func(mom *Mother) {
-		defer close(mom.events)
-		// To handle each bot's events synchronously
-		go handleEvents(mom, mom.events)
-		// Queues event to perform conversation reaping every TimeoutCheckInterval
-		go func(mom *Mother) {
-			for mom.online {
-				mom.events <- slack.RTMEvent{
-					Type: "scrub",
-					Data: &scrubEvent{Type: "scrub"},
-				}
-				time.Sleep(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
-			}
-		}(mom)
-		// Forwards events from Slack API library to allow us to mix in our own events
-		for msg := range mom.rtm.IncomingEvents {
-			if !mom.online {
-				break
-			}
-			mom.events <- msg
-		}
-	}(mom)
+	if err := json.Unmarshal(data, &config); err != nil {
+		log.Println(err)
+		return false
+	}
+	botName := strings.TrimSuffix(configFile.Name(), ext)
+	if !config.Enabled {
+		log.Println(botName, "is not enabled")
+		return false
+	}
+	mom, err := getMother(botName, config)
+	if err != nil {
+		log.Println(err)
+		return false
+	}
+	mom.connect()
+	mothers.Store(mom.Name, mom)
 	return true
 }
 
@@ -217,11 +120,6 @@ func main() {
 	for {
 		loaded := 0
 		mothers.Range(func(_, value interface{}) bool {
-			mom := value.(*Mother)
-			if !mom.online && !mom.reload {
-				mom.rtm = slack.New(mom.config.Token, slack.OptionDebug(false), slack.OptionLog(mom.log)).NewRTM()
-				go mom.rtm.ManageConnection()
-			}
 			loaded++
 			return true
 		})

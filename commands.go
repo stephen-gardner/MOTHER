@@ -383,16 +383,16 @@ func cmdReload(mom *Mother, _ cmdParams) bool {
 		return false
 	}
 	mom.reload = true
-	if err := mom.rtm.Disconnect(); err != nil {
-		mom.log.Println(err)
-		return false
-	}
 	go func(mom *Mother, configFile os.FileInfo) {
+		mom.rtm.Disconnect()
 		for mom.online {
 			time.Sleep(time.Second)
 		}
 		if loadBot(configFile) {
 			mothers.Range(blacklistBots)
+		} else {
+			// Clean up disabled bot in the event of an error
+			mothers.Delete(mom.Name)
 		}
 	}(mom, configFile)
 	return true
@@ -410,13 +410,8 @@ func cmdUnload(mom *Mother, params cmdParams) bool {
 	if !present {
 		return false
 	}
-	unload := bot.(*Mother)
-	go func(unload *Mother) {
-		unload.events <- slack.RTMEvent{
-			Type: "shutdown",
-			Data: &shutdownEvent{Type: "shutdown"},
-		}
-	}(unload)
+	toUnload := bot.(*Mother)
+	go toUnload.rtm.Disconnect()
 	return true
 }
 

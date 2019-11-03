@@ -3,8 +3,20 @@ package main
 import (
 	"fmt"
 	"sort"
+	"time"
 
 	"github.com/nlopes/slack"
+)
+
+type (
+	blacklistEvent struct {
+		Type    string
+		SlackID string
+	}
+
+	scrubEvent struct {
+		Type string
+	}
 )
 
 func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack.User) {
@@ -261,5 +273,71 @@ func handleUserTypingEvent(mom *Mother, ev *slack.UserTypingEvent) {
 	}
 	if chanInfo.IsIM || chanInfo.IsMpIM {
 		mom.rtm.SendMessage(mom.rtm.NewTypingMessage(mom.config.ChanID))
+	}
+}
+
+func handleEvents(mom *Mother) {
+	for msg := range mom.events {
+		switch ev := msg.Data.(type) {
+		case *blacklistEvent:
+			mom.blacklistUser(ev.SlackID)
+
+		case *scrubEvent:
+			mom.reapConversations()
+			mom.spoofAvailability()
+
+		case *slack.ChannelJoinedEvent:
+			handleChannelJoinedEvent(mom, ev)
+
+		case *slack.ConnectedEvent:
+			mom.log.Printf("Connected (%d times)...\n", ev.ConnectionCount+1)
+
+		case *slack.DisconnectedEvent:
+			mom.log.Printf("Disconnected (Intentional: %v, Reload: %v)...\n", ev.Intentional, mom.reload)
+			if ev.Intentional {
+				// We need the main thread to count this bot in the event of a reload to prevent premature shutdown
+				// The key will be overwritten anyway
+				if !mom.reload {
+					mothers.Delete(mom.Name)
+				}
+				mom.online = false
+			}
+
+		case *slack.GroupJoinedEvent:
+			handleGroupJoinedEvent(mom, ev)
+
+		case *slack.InvalidAuthEvent:
+			mom.log.Println("Invalid credentials")
+			mom.online = false
+			return
+
+		case *slack.MemberJoinedChannelEvent:
+			handleMemberJoinedChannelEvent(mom, ev)
+
+		case *slack.MemberLeftChannelEvent:
+			handleMemberLeftChannelEvent(mom, ev)
+
+		case *slack.MessageEvent:
+			handleMessageEvent(mom, ev)
+
+		case *slack.RateLimitedError:
+			mom.log.Printf("Hitting RTM rate limit; sleeping for %d seconds\n", ev.RetryAfter)
+			time.Sleep(ev.RetryAfter * time.Second)
+
+		case *slack.ReactionAddedEvent:
+			handleReactionAddedEvent(mom, ev)
+
+		case *slack.ReactionRemovedEvent:
+			handleReactionRemovedEvent(mom, ev)
+
+		case *slack.RTMError:
+			mom.log.Println("Error:", ev.Error())
+
+		case *slack.UserTypingEvent:
+			handleUserTypingEvent(mom, ev)
+
+		default:
+			// Ignore other events..
+		}
 	}
 }

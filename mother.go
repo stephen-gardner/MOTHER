@@ -37,33 +37,27 @@ type (
 	}
 )
 
-func getMother(config botConfig) *Mother {
-	logger := log.New(os.Stdout, config.Name+": ", log.LstdFlags)
-	rtm := slack.New(config.Token, slack.OptionDebug(false), slack.OptionLog(logger)).NewRTM()
-	go rtm.ManageConnection()
+func getMother(botName string, config botConfig) (*Mother, error) {
 	mom := &Mother{
-		Name:      config.Name,
+		Name:      botName,
 		config:    config,
-		log:       logger,
-		rtm:       rtm,
-		events:    make(chan slack.RTMEvent),
+		log:       log.New(os.Stdout, botName+": ", log.LstdFlags),
 		chanInfo:  make(map[string]*slack.Channel),
 		usersInfo: make(map[string]*slack.User),
 		invited:   make([]string, 0),
-		startedAt: time.Now(),
-		online:    true,
+		online:    false,
 		reload:    false,
 	}
 	// Load conversations that should still be active
 	updateThreshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))
-	q := db.Where("name = ?", config.Name)
+	q := db.Where("name = ?", mom.Name)
 	q = q.Preload("BlacklistedUsers")
 	q = q.Preload("Conversations", "updated_at > ?", updateThreshold, func(db *gorm.DB) *gorm.DB {
 		return db.Order("conversations.direct_id desc, conversations.updated_at desc")
 	})
 	q = q.Preload("Conversations.MessageLogs")
 	if err := q.FirstOrCreate(mom).Error; err != nil {
-		mom.log.Fatal(err)
+		return nil, err
 	}
 	// If multiple Conversations per DirectID is loaded, only the most recent should be active
 	i := 0
@@ -78,7 +72,37 @@ func getMother(config botConfig) *Mother {
 		prev = &conv
 	}
 	mom.Conversations = mom.Conversations[:i]
-	return mom
+	return mom, nil
+}
+
+func (mom *Mother) connect() {
+	mom.online = true
+	mom.startedAt = time.Now()
+	mom.rtm = slack.New(mom.config.Token, slack.OptionDebug(false), slack.OptionLog(mom.log)).NewRTM()
+	go mom.rtm.ManageConnection()
+	go func(mom *Mother) {
+		// To handle each bot's events synchronously
+		mom.events = make(chan slack.RTMEvent)
+		defer close(mom.events)
+		go handleEvents(mom)
+		// Queues event to perform conversation reaping every TimeoutCheckInterval
+		go func(mom *Mother) {
+			for mom.online {
+				mom.events <- slack.RTMEvent{
+					Type: "scrub",
+					Data: &scrubEvent{Type: "scrub"},
+				}
+				time.Sleep(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
+			}
+		}(mom)
+		// Forwards events from Slack API library to allow us to mix in our own events
+		for msg := range mom.rtm.IncomingEvents {
+			if !mom.online {
+				break
+			}
+			mom.events <- msg
+		}
+	}(mom)
 }
 
 func (mom *Mother) isBlacklisted(slackID string) bool {
