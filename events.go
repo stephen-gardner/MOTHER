@@ -289,8 +289,16 @@ func handleEvents(mom *Mother) {
 		case *slack.ChannelJoinedEvent:
 			handleChannelJoinedEvent(mom, ev)
 
+		case *slack.ConnectionErrorEvent:
+			mom.log.Printf(
+				"Connection error (%d attempts): %s; reconnecting in %v...\n",
+				ev.Attempt,
+				ev.Error(),
+				ev.Backoff,
+			)
+
 		case *slack.ConnectedEvent:
-			mom.log.Printf("Connected (%d times)...\n", ev.ConnectionCount+1)
+			mom.log.Printf("Connected (#%d)...\n", ev.ConnectionCount+1)
 
 		case *slack.DisconnectedEvent:
 			mom.log.Printf("Disconnected (Intentional: %v, Reload: %v)...\n", ev.Intentional, mom.reload)
@@ -308,6 +316,7 @@ func handleEvents(mom *Mother) {
 
 		case *slack.InvalidAuthEvent:
 			mom.log.Println("Invalid credentials")
+			mothers.Delete(mom)
 			mom.online = false
 			return
 

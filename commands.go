@@ -25,19 +25,20 @@ type cmdParams struct {
 var commands map[string]func(mom *Mother, params cmdParams) bool
 
 func initCommands() {
-	commands = make(map[string]func(mom *Mother, params cmdParams) bool)
-	commands["active"] = cmdActive
-	commands["blacklist"] = cmdBlacklist
-	commands["close"] = cmdClose
-	commands["contact"] = cmdContact
-	commands["help"] = cmdHelp
-	commands["invite"] = cmdInvite
-	commands["load"] = cmdLoad
-	commands["logs"] = cmdLogs
-	commands["reload"] = cmdReload
-	commands["resume"] = cmdResume
-	commands["unload"] = cmdUnload
-	commands["uptime"] = cmdUptime
+	commands = map[string]func(mom *Mother, params cmdParams) bool{
+		"active":    cmdActive,
+		"blacklist": cmdBlacklist,
+		"close":     cmdClose,
+		"contact":   cmdContact,
+		"help":      cmdHelp,
+		"invite":    cmdInvite,
+		"load":      cmdLoad,
+		"logs":      cmdLogs,
+		"reload":    cmdReload,
+		"resume":    cmdResume,
+		"unload":    cmdUnload,
+		"uptime":    cmdUptime,
+	}
 }
 
 func getSlackID(tagged string) string {
@@ -57,6 +58,7 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 			for _, slackID := range strings.Split(conv.SlackIDs, ",") {
 				tagged = append(tagged, fmt.Sprintf("<@%s>", slackID))
 			}
+			// Get how much time is left before conversation expires
 			timeout := time.Duration(mom.config.SessionTimeout) * time.Second
 			timeout -= time.Now().Sub(conv.UpdatedAt)
 			line := fmt.Sprintf(
