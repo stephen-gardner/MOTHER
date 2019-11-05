@@ -31,6 +31,7 @@ func initCommands() {
 		"close":     cmdClose,
 		"contact":   cmdContact,
 		"help":      cmdHelp,
+		"history":   cmdHistory,
 		"invite":    cmdInvite,
 		"load":      cmdLoad,
 		"logs":      cmdLogs,
@@ -73,8 +74,8 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 	if len(active) == 1 {
 		active = append(active, mom.getMsg("listNone"))
 	}
-	out := strings.Join(active, "\n")
-	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
+	msg := strings.Join(active, "\n")
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
 }
 
@@ -188,7 +189,7 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 }
 
 func cmdHelp(mom *Mother, params cmdParams) bool {
-	var out string
+	var msg string
 	if len(params.args) == 0 {
 		help := make([]string, 0)
 		for cmd := range commands {
@@ -198,16 +199,80 @@ func cmdHelp(mom *Mother, params cmdParams) bool {
 			}
 		}
 		sort.Strings(help)
-		out = mom.getMsg("cmdHelp") + strings.Join(help, "\n")
+		msg = mom.getMsg("cmdHelp") + strings.Join(help, "\n")
 	} else {
 		cmd := params.args[0]
 		if _, present := commands[cmd]; !present {
 			return false
 		}
 		key := "cmdHelp" + strings.ToUpper(cmd[0:1]) + cmd[1:]
-		out = mom.getMsg(key) + "\n"
+		msg = mom.getMsg(key) + "\n"
 	}
-	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
+	return true
+}
+
+// Display paginated log of recent threads
+func cmdHistory(mom *Mother, params cmdParams) bool {
+	var convos []Conversation
+	slackIDs := make([]string, 0)
+	page := 1
+	if len(params.args) > 0 {
+		for i := 0; i < len(params.args); i++ {
+			ID := getSlackID(params.args[i])
+			if ID == "" {
+				break
+			}
+			slackIDs = append(slackIDs, ID)
+		}
+		sort.Strings(slackIDs)
+		params.args = params.args[len(slackIDs):]
+	}
+	if len(params.args) > 0 {
+		var err error
+		if page, err = strconv.Atoi(params.args[0]); err != nil || page < 0 {
+			return false
+		}
+	}
+	var err error
+	if len(slackIDs) > 0 {
+		err = db.
+			Where("mother_id = ? AND slack_ids = ?", mom.ID, strings.Join(slackIDs, ",")).
+			Order("updated_at desc, id desc").
+			Limit(mom.config.ThreadsPerPage).
+			Offset(mom.config.ThreadsPerPage * (page - 1)).
+			Find(&convos).Error
+	} else {
+		err = db.
+			Where("mother_id = ?", mom.ID, ).
+			Order("updated_at desc, id desc").
+			Limit(mom.config.ThreadsPerPage).
+			Offset(mom.config.ThreadsPerPage * (page - 1)).
+			Find(&convos).Error
+	}
+	if err != nil && err != gorm.ErrRecordNotFound {
+		mom.log.Println(err)
+		return false
+	}
+	threads := []string{fmt.Sprintf(mom.getMsg("cmdHistory"), page)}
+	for _, conv := range convos {
+		users := strings.Split(conv.SlackIDs, ",")
+		for i, ID := range users {
+			users[i] = fmt.Sprintf("<@%s>", ID)
+		}
+		line := fmt.Sprintf(
+			mom.getMsg("cmdHistoryElement"),
+			mom.getMessageLink(conv.ThreadID),
+			strings.Join(users, ", "),
+			conv.UpdatedAt,
+		)
+		threads = append(threads, line)
+	}
+	if len(convos) == 0 {
+		threads = append(threads, mom.getMsg("listNone"))
+	}
+	msg := strings.Join(threads, "\n")
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
 }
 
@@ -236,16 +301,13 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 		return false
 	}
 	var convos []Conversation
+	var err error
 	ID := getSlackID(params.args[0])
 	if len(params.args) == 1 && ID == "" {
-		q := db.Where("thread_id = ?", params.args[0])
-		q = q.Preload("MessageLogs")
-		if err := q.Find(&convos).Error; err != nil {
-			if err != gorm.ErrRecordNotFound {
-				mom.log.Println(err)
-			}
-			return false
-		}
+		err = db.
+			Where("mother_id = ? AND thread_id = ?", mom.ID, params.args[0]).
+			Preload("MessageLogs").
+			Find(&convos).Error
 	} else if ID != "" {
 		slackIDs := make([]string, 0)
 		for _, tagged := range params.args {
@@ -256,14 +318,16 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 			slackIDs = append(slackIDs, ID)
 		}
 		sort.Strings(slackIDs)
-		q := db.Where("slack_ids LIKE ?", strings.Join(slackIDs, ","))
-		q = q.Preload("MessageLogs")
-		if err := q.Find(&convos).Error; err != nil {
-			if err != gorm.ErrRecordNotFound {
-				mom.log.Println(err)
-			}
-			return false
+		err = db.
+			Where("mother_id = ? AND slack_ids LIKE ?", mom.ID, strings.Join(slackIDs, ",")).
+			Preload("MessageLogs").
+			Find(&convos).Error
+	}
+	if err != nil {
+		if err != gorm.ErrRecordNotFound {
+			mom.log.Println(err)
 		}
+		return false
 	}
 	buff := &bytes.Buffer{}
 	first := true
@@ -292,7 +356,12 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 		}
 		first = false
 	}
-	_, err := mom.rtm.UploadFile(
+	if buff.Len() == 0 {
+		msg := mom.getMsg("logNoRecords")
+		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
+		return true
+	}
+	_, err = mom.rtm.UploadFile(
 		slack.FileUploadParameters{
 			Reader:          buff,
 			Filename:        "Logs.txt",
@@ -330,9 +399,11 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 			var err error
 			conv = &Conversation{}
 			sort.Strings(slackIDs)
-			q := db.Where("slack_ids = ?", strings.Join(slackIDs, ","))
-			q = q.Order("updated_at desc").First(conv)
-			if err = q.Error; err != nil {
+			err = db.
+				Where("mother_id = ? AND slack_ids = ?", mom.ID, strings.Join(slackIDs, ",")).
+				Order("updated_at desc, id desc").
+				First(conv).Error
+			if err != nil {
 				if err != gorm.ErrRecordNotFound {
 					mom.log.Println(err)
 				}
@@ -432,7 +503,7 @@ func cmdUptime(mom *Mother, params cmdParams) bool {
 		}
 		duration := ""
 		if bot.online {
-			duration = time.Now().Sub(bot.startedAt).Round(time.Second).String()
+			duration = time.Now().Sub(bot.connectedAt).Round(time.Second).String()
 		} else {
 			duration = "Offline"
 		}
@@ -440,7 +511,7 @@ func cmdUptime(mom *Mother, params cmdParams) bool {
 		uptime = append(uptime, info)
 		return true
 	})
-	out := strings.Join(uptime, "\n")
-	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(out, params.chanID, slack.RTMsgOptionTS(params.threadID)))
+	msg := strings.Join(uptime, "\n")
+	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
 }

@@ -35,7 +35,11 @@ type (
 )
 
 func (conv *Conversation) addLog(entry *MessageLog) {
-	if err := db.Model(conv).Association("MessageLogs").Append(entry).Error; err != nil {
+	err := db.
+		Model(conv).
+		Association("MessageLogs").
+		Append(entry).Error
+	if err != nil {
 		conv.mom.log.Println(err)
 	}
 	conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
@@ -206,7 +210,10 @@ func (conv *Conversation) expire() {
 }
 
 func (conv *Conversation) update() {
-	if err := db.Model(conv).Update("updated_at", time.Now()).Error; err != nil {
+	err := db.
+		Model(conv).
+		Update("updated_at", time.Now()).Error
+	if err != nil {
 		conv.mom.log.Println(err)
 	}
 }

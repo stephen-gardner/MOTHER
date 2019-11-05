@@ -25,7 +25,7 @@ type (
 		chanInfo         map[string]*slack.Channel `gorm:"-"`
 		usersInfo        map[string]*slack.User    `gorm:"-"`
 		invited          []string                  `gorm:"-"`
-		startedAt        time.Time                 `gorm:"-"`
+		connectedAt      time.Time                 `gorm:"-"`
 		online           bool                      `gorm:"-"`
 		reload           bool                      `gorm:"-"`
 	}
@@ -50,13 +50,15 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 	}
 	// Load conversations that should still be active
 	updateThreshold := time.Now().Add(-(time.Duration(mom.config.SessionTimeout) * time.Second))
-	q := db.Where("name = ?", mom.Name)
-	q = q.Preload("BlacklistedUsers")
-	q = q.Preload("Conversations", "updated_at > ?", updateThreshold, func(db *gorm.DB) *gorm.DB {
-		return db.Order("conversations.direct_id desc, conversations.updated_at desc")
-	})
-	q = q.Preload("Conversations.MessageLogs")
-	if err := q.FirstOrCreate(mom).Error; err != nil {
+	err := db.
+		Where("name = ?", mom.Name).
+		Preload("BlacklistedUsers").
+		Preload("Conversations", "updated_at > ?", updateThreshold, func(db *gorm.DB) *gorm.DB {
+			return db.Order("conversations.direct_id desc, conversations.updated_at desc")
+		}).
+		Preload("Conversations.MessageLogs").
+		FirstOrCreate(mom).Error
+	if err != nil {
 		return nil, err
 	}
 	// If multiple Conversations per DirectID is loaded, only the most recent should be active
@@ -77,7 +79,6 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 
 func (mom *Mother) connect() {
 	mom.online = true
-	mom.startedAt = time.Now()
 	mom.rtm = slack.New(mom.config.Token, slack.OptionDebug(false), slack.OptionLog(mom.log)).NewRTM()
 	go mom.rtm.ManageConnection()
 	go func(mom *Mother) {
@@ -122,7 +123,11 @@ func (mom *Mother) blacklistUser(slackID string) bool {
 		MotherID: mom.ID,
 		SlackID:  slackID,
 	}
-	if err := db.Model(mom).Association("BlacklistedUsers").Append(bu).Error; err != nil {
+	err := db.
+		Model(mom).
+		Association("BlacklistedUsers").
+		Append(bu).Error
+	if err != nil {
 		mom.log.Println(err)
 		return false
 	}
@@ -133,7 +138,11 @@ func (mom *Mother) blacklistUser(slackID string) bool {
 func (mom *Mother) removeBlacklistedUser(slackID string) bool {
 	for _, bu := range mom.BlacklistedUsers {
 		if bu.SlackID == slackID {
-			if err := db.Model(mom).Association("BlacklistedUsers").Delete(bu).Error; err != nil {
+			err := db.
+				Model(mom).
+				Association("BlacklistedUsers").
+				Delete(bu).Error
+			if err != nil {
 				mom.log.Println(err)
 				return false
 			}
@@ -182,7 +191,11 @@ func (mom *Mother) createConversation(directID string, slackIDs []string, notify
 func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 	conv := &Conversation{}
 	conv.init(mom)
-	if err := db.Where("thread_id = ?", threadID).Preload("MessageLogs").First(conv).Error; err != nil {
+	err := db.
+		Where("mother_id = ? AND thread_id = ?", mom.ID, threadID).
+		Preload("MessageLogs").
+		First(conv).Error
+	if err != nil {
 		if gorm.IsRecordNotFoundError(err) {
 			return nil, nil
 		}
@@ -223,7 +236,11 @@ func (mom *Mother) trackConversation(conv *Conversation) (bool, error) {
 			break
 		}
 	}
-	if err := db.Model(mom).Association("Conversations").Append(conv).Error; err != nil {
+	err := db.
+		Model(mom).
+		Association("Conversations").
+		Append(conv).Error
+	if err != nil {
 		return false, err
 	}
 	if prev != nil {

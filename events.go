@@ -298,6 +298,7 @@ func handleEvents(mom *Mother) {
 			)
 
 		case *slack.ConnectedEvent:
+			mom.connectedAt = time.Now()
 			mom.log.Printf("Connected (#%d)...\n", ev.ConnectionCount+1)
 
 		case *slack.DisconnectedEvent:
