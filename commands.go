@@ -52,7 +52,7 @@ func getSlackID(tagged string) string {
 }
 
 func cmdActive(mom *Mother, params cmdParams) bool {
-	active := []string{mom.getMsg("listActive")}
+	active := []string{mom.getMsg("cmdActive")}
 	for _, conv := range mom.Conversations {
 		if conv.active {
 			tagged := make([]string, 0)
@@ -63,7 +63,7 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 			timeout := time.Duration(mom.config.SessionTimeout) * time.Second
 			timeout -= time.Now().Sub(conv.UpdatedAt)
 			line := fmt.Sprintf(
-				mom.getMsg("listActiveElement"),
+				mom.getMsg("cmdActiveElement"),
 				mom.getMessageLink(conv.ThreadID),
 				strings.Join(tagged, ", "),
 				timeout.Round(time.Second),
@@ -86,7 +86,7 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 			tagged = append(tagged, fmt.Sprintf("<@%s>", bu.SlackID))
 		}
 		sort.Strings(tagged) // It won't be alphabetical, but at least keeps the list order consistent
-		msg := mom.getMsg("listBlacklisted") + strings.Join(tagged, ", ")
+		msg := mom.getMsg("cmdBlacklist") + strings.Join(tagged, ", ")
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
@@ -335,7 +335,7 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 		if !first {
 			buff.WriteRune('\n')
 		}
-		buff.WriteString(fmt.Sprintf(mom.getMsg("logThread"), conv.ThreadID))
+		buff.WriteString(fmt.Sprintf(mom.getMsg("cmdLogsThread"), conv.ThreadID))
 		for _, msg := range conv.MessageLogs {
 			if msg.Msg != "" {
 				userInfo, err := mom.getUserInfo(msg.SlackID)
@@ -347,9 +347,9 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 				timestamp := time.Unix(epoch, 0).String()
 				format := ""
 				if msg.Original {
-					format = mom.getMsg("logMsg")
+					format = mom.getMsg("cmdLogsMsg")
 				} else {
-					format = mom.getMsg("logMsgEdited")
+					format = mom.getMsg("cmdLogsMsgEdited")
 				}
 				buff.WriteString(fmt.Sprintf(format, timestamp, userInfo.Profile.DisplayName, msg.Msg))
 			}
@@ -357,7 +357,7 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 		first = false
 	}
 	if buff.Len() == 0 {
-		msg := mom.getMsg("logNoRecords")
+		msg := mom.getMsg("cmdLogsNoRecords")
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
@@ -490,22 +490,22 @@ func cmdUnload(mom *Mother, params cmdParams) bool {
 
 // Display information about how long each bot has been active
 func cmdUptime(mom *Mother, params cmdParams) bool {
-	uptime := []string{mom.getMsg("listUptime")}
+	uptime := []string{mom.getMsg("cmdUptime")}
 	mothers.Range(func(key, value interface{}) bool {
 		name := key.(string)
 		bot := value.(*Mother)
 		msg := ""
 		// Can't tag bots located in different workspaces
 		if mom.rtm.GetInfo().Team.ID == bot.rtm.GetInfo().Team.ID {
-			msg = mom.getMsg("listUptimeElement")
+			msg = mom.getMsg("cmdUptimeElement")
 		} else {
-			msg = mom.getMsg("listUptimeForeignElement")
+			msg = mom.getMsg("cmdUptimeForeignElement")
 		}
 		duration := ""
 		if bot.online {
 			duration = time.Now().Sub(bot.connectedAt).Round(time.Second).String()
 		} else {
-			duration = "Offline"
+			duration = mom.getMsg("cmdUptimeOffline")
 		}
 		info := fmt.Sprintf(msg, name, bot.rtm.GetInfo().User.ID, duration)
 		uptime = append(uptime, info)
