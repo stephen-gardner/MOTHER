@@ -442,7 +442,7 @@ func cmdLoad(mom *Mother, params cmdParams) bool {
 	}
 	res := loadBot(configFile)
 	if res {
-		mothers.Range(blacklistBots)
+		go mothers.Range(blacklistBots)
 	}
 	return res
 }
@@ -455,14 +455,15 @@ func cmdReload(mom *Mother, _ cmdParams) bool {
 		mom.log.Println(err)
 		return false
 	}
-	mom.reload = true
 	go func(mom *Mother, configFile os.FileInfo) {
+		mom.reload = true
 		mom.rtm.Disconnect()
-		for mom.online {
-			time.Sleep(time.Second)
-		}
+		// Wait for bot to fully disconnect
+		<-mom.shutdown
+		// Need a little time to prevent new instance from picking up duplicate events
+		time.Sleep(time.Second * 5)
 		if loadBot(configFile) {
-			mothers.Range(blacklistBots)
+			go mothers.Range(blacklistBots)
 		} else {
 			// Clean up disabled bot in the event of an error
 			mothers.Delete(mom.Name)
@@ -501,8 +502,8 @@ func cmdUptime(mom *Mother, params cmdParams) bool {
 		} else {
 			msg = mom.getMsg("cmdUptimeForeignElement")
 		}
-		duration := ""
-		if bot.online {
+		var duration string
+		if bot.isOnline() {
 			duration = time.Now().Sub(bot.connectedAt).Round(time.Second).String()
 		} else {
 			duration = mom.getMsg("cmdUptimeOffline")

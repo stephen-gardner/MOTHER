@@ -26,48 +26,45 @@ type botConfig struct {
 
 var mothers = sync.Map{}
 
+// This function should be called asynchronously
 func blacklistBots(_, value interface{}) bool {
 	mom := value.(*Mother)
-	if !mom.online {
+	if !mom.isOnline() {
 		return true
 	}
-	go func(mom *Mother) {
-		// Annoying Slackbot that we can't disable
-		mom.events <- slack.RTMEvent{
-			Type: "blacklist",
-			Data: &blacklistEvent{Type: "blacklist", SlackID: "USLACKBOT"},
+	// Annoying Slackbot that we can't disable
+	mom.events <- slack.RTMEvent{
+		Type: "blacklist",
+		Data: &blacklistEvent{Type: "blacklist", SlackID: "USLACKBOT"},
+	}
+	// Often it takes a moment for the bot to initialize and recognize its own identity
+	for mom.rtm.GetInfo() == nil {
+		time.Sleep(time.Second)
+		if !mom.isOnline() {
+			return true
 		}
-		// Often it takes a moment for the bot to initialize and recognize its own identity
-		for mom.rtm.GetInfo() == nil {
-			if !mom.online {
-				return
-			}
+	}
+	mothers.Range(func(_, value interface{}) bool {
+		other := value.(*Mother)
+		if !other.isOnline() {
+			return true
+		}
+		for other.rtm.GetInfo() == nil {
 			time.Sleep(time.Second)
-		}
-		mothers.Range(func(_, value interface{}) bool {
-			other := value.(*Mother)
-			if !other.online {
+			if !other.isOnline() {
 				return true
 			}
-			go func(mom, other *Mother) {
-				for other.rtm.GetInfo() == nil {
-					if !other.online {
-						return
-					}
-					time.Sleep(time.Second)
-				}
-				// Only blacklist bots located in the same workspace
-				if other.rtm.GetInfo().Team.ID != mom.rtm.GetInfo().Team.ID {
-					return
-				}
-				other.events <- slack.RTMEvent{
-					Type: "blacklist",
-					Data: &blacklistEvent{Type: "blacklist", SlackID: mom.rtm.GetInfo().User.ID},
-				}
-			}(mom, other)
+		}
+		// Only blacklist bots located in the same workspace
+		if other.rtm.GetInfo().Team.ID != mom.rtm.GetInfo().Team.ID {
 			return true
-		})
-	}(mom)
+		}
+		other.events <- slack.RTMEvent{
+			Type: "blacklist",
+			Data: &blacklistEvent{Type: "blacklist", SlackID: mom.rtm.GetInfo().User.ID},
+		}
+		return true
+	})
 	return true
 }
 
@@ -97,8 +94,8 @@ func loadBot(configFile os.FileInfo) bool {
 		log.Println(err)
 		return false
 	}
-	mom.connect()
 	mothers.Store(mom.Name, mom)
+	mom.connect()
 	return true
 }
 
@@ -115,7 +112,7 @@ func main() {
 		loadBot(configFile)
 	}
 	// We need the bots to blacklist each other to avoid potentially looping messages
-	mothers.Range(blacklistBots)
+	go mothers.Range(blacklistBots)
 	// Keep application alive until all bots are offline
 	for {
 		loaded := 0

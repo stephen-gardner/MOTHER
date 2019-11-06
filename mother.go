@@ -18,15 +18,15 @@ type (
 		Name             string
 		Conversations    []Conversation
 		BlacklistedUsers []BlacklistedUser
+		chanInfo         map[string]*slack.Channel `gorm:"-"`
+		usersInfo        map[string]*slack.User    `gorm:"-"`
+		invited          []string                  `gorm:"-"`
 		config           botConfig                 `gorm:"-"`
 		log              *log.Logger               `gorm:"-"`
 		rtm              *slack.RTM                `gorm:"-"`
 		events           chan slack.RTMEvent       `gorm:"-"`
-		chanInfo         map[string]*slack.Channel `gorm:"-"`
-		usersInfo        map[string]*slack.User    `gorm:"-"`
-		invited          []string                  `gorm:"-"`
+		shutdown         chan struct{}             `gorm:"-"`
 		connectedAt      time.Time                 `gorm:"-"`
-		online           bool                      `gorm:"-"`
 		reload           bool                      `gorm:"-"`
 	}
 
@@ -45,7 +45,6 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 		chanInfo:  make(map[string]*slack.Channel),
 		usersInfo: make(map[string]*slack.User),
 		invited:   make([]string, 0),
-		online:    false,
 		reload:    false,
 	}
 	// Load conversations that should still be active
@@ -78,7 +77,7 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 }
 
 func (mom *Mother) connect() {
-	mom.online = true
+	mom.shutdown = make(chan struct{})
 	mom.rtm = slack.New(mom.config.Token, slack.OptionDebug(false), slack.OptionLog(mom.log)).NewRTM()
 	go mom.rtm.ManageConnection()
 	go func(mom *Mother) {
@@ -86,24 +85,32 @@ func (mom *Mother) connect() {
 		mom.events = make(chan slack.RTMEvent)
 		defer close(mom.events)
 		go handleEvents(mom)
-		// Queues event to perform conversation reaping every TimeoutCheckInterval
-		go func(mom *Mother) {
-			for mom.online {
+		reapTicker := time.NewTicker(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
+		for {
+			select {
+			// Forwards events from Slack API library to allow us to mix in our own events
+			case msg := <-mom.rtm.IncomingEvents:
+				mom.events <- msg
+			// Queues event to perform conversation reaping every TimeoutCheckInterval
+			case <-reapTicker.C:
 				mom.events <- slack.RTMEvent{
 					Type: "scrub",
 					Data: &scrubEvent{Type: "scrub"},
 				}
-				time.Sleep(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
+			case <-mom.shutdown:
+				return
 			}
-		}(mom)
-		// Forwards events from Slack API library to allow us to mix in our own events
-		for msg := range mom.rtm.IncomingEvents {
-			if !mom.online {
-				break
-			}
-			mom.events <- msg
 		}
 	}(mom)
+}
+
+func (mom *Mother) isOnline() bool {
+	select {
+	case <-mom.shutdown:
+		return false
+	default:
+		return true
+	}
 }
 
 func (mom *Mother) isBlacklisted(slackID string) bool {
