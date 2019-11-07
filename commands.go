@@ -91,7 +91,6 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
-
 	rm := false
 	if params.args[0] == "rm" {
 		if len(params.args) < 2 {
@@ -104,21 +103,28 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 	for _, tagged := range params.args {
 		ID := getSlackID(tagged)
 		listed := mom.isBlacklisted(ID)
-		if ID == "" || (rm && !listed) || (!rm && listed) {
+		isBot := ID == "USLACKBOT"
+		if !isBot {
+			mothers.Range(func(_, value interface{}) bool {
+				other := value.(*Mother)
+				if other.rtm.GetInfo().User.ID == ID {
+					isBot = true
+					return false
+				}
+				return true
+			})
+		}
+		if ID == "" || ID == params.userID || (rm && !listed) || (!rm && listed) || isBot {
 			return false
 		}
 		slackIDs = append(slackIDs, ID)
 	}
-	res := true
+	var res bool
 	for _, ID := range slackIDs {
 		if rm {
-			if !mom.removeBlacklistedUser(ID) {
-				res = false
-			}
+			res = mom.removeBlacklistedUser(ID)
 		} else {
-			if !mom.blacklistUser(ID) {
-				res = false
-			}
+			res = mom.blacklistUser(ID)
 		}
 	}
 	return res
