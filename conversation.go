@@ -17,10 +17,10 @@ type (
 		DirectID    string
 		ThreadID    string
 		MessageLogs []MessageLog
+		Active      bool
 		mom         *Mother           `gorm:"-"`
 		convIndex   map[string]string `gorm:"-"`
 		directIndex map[string]string `gorm:"-"`
-		active      bool              `gorm:"-"`
 	}
 
 	MessageLog struct {
@@ -197,7 +197,7 @@ func (conv *Conversation) init(mom *Mother) {
 	conv.mom = mom
 	conv.convIndex = make(map[string]string)
 	conv.directIndex = make(map[string]string)
-	conv.active = true
+	conv.Active = true
 	for _, entry := range conv.MessageLogs {
 		conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
 		conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp
@@ -205,7 +205,12 @@ func (conv *Conversation) init(mom *Mother) {
 }
 
 func (conv *Conversation) expire() {
-	conv.active = false
+	err := db.
+		Model(conv).
+		Update("active", false).Error
+	if err != nil {
+		conv.mom.log.Println(err)
+	}
 	conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
 	conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.ThreadID))
 }

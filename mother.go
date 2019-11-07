@@ -58,9 +58,11 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 	err := db.
 		Where("name = ?", mom.Name).
 		Preload("BlacklistedUsers").
-		Preload("Conversations", "updated_at > ?", updateThreshold, func(db *gorm.DB) *gorm.DB {
-			return db.Order("conversations.direct_id desc, conversations.updated_at desc")
-		}).
+		Preload("Conversations", "active = ? AND updated_at > ?", true, updateThreshold,
+			func(db *gorm.DB) *gorm.DB {
+				return db.Order("conversations.direct_id desc, conversations.updated_at desc")
+			},
+		).
 		Preload("Conversations.MessageLogs").
 		FirstOrCreate(mom).Error
 	if err != nil {
@@ -243,7 +245,7 @@ func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 func (mom *Mother) trackConversation(conv *Conversation) (bool, error) {
 	var prev *Conversation
 	for i, p := range mom.Conversations {
-		if mom.Conversations[i].active && mom.Conversations[i].DirectID == conv.DirectID {
+		if mom.Conversations[i].Active && mom.Conversations[i].DirectID == conv.DirectID {
 			prev = &p
 			mom.Conversations = append(mom.Conversations[:i], mom.Conversations[i+1:]...)
 			break
@@ -268,7 +270,7 @@ func (mom *Mother) trackConversation(conv *Conversation) (bool, error) {
 func (mom *Mother) deactivateConversations(slackID string) {
 	for i := range mom.Conversations {
 		conv := &mom.Conversations[i]
-		if !conv.active {
+		if !conv.Active {
 			continue
 		}
 		for _, ID := range strings.Split(conv.SlackIDs, ",") {
@@ -284,13 +286,13 @@ func (mom *Mother) reapConversations() {
 	epoch := time.Now()
 	i := 0
 	for _, conv := range mom.Conversations {
-		if conv.active && int64(epoch.Sub(conv.UpdatedAt).Seconds()) < mom.config.SessionTimeout {
+		if conv.Active && int64(epoch.Sub(conv.UpdatedAt).Seconds()) < mom.config.SessionTimeout {
 			mom.Conversations[i] = conv
 			i++
 			continue
 		}
 		delete(mom.chanInfo, conv.DirectID)
-		if conv.active {
+		if conv.Active {
 			conv.expire()
 		}
 	}
@@ -299,7 +301,7 @@ func (mom *Mother) reapConversations() {
 
 func (mom *Mother) findConversationByChannel(directID string) *Conversation {
 	for _, conv := range mom.Conversations {
-		if conv.active && conv.DirectID == directID {
+		if conv.Active && conv.DirectID == directID {
 			return &conv
 		}
 	}
@@ -311,7 +313,7 @@ func (mom *Mother) findConversationByUsers(slackIDs []string) *Conversation {
 	seeking := strings.Join(slackIDs, ",")
 	for i := range mom.Conversations {
 		conv := &mom.Conversations[i]
-		if conv.active && seeking == conv.SlackIDs {
+		if conv.Active && seeking == conv.SlackIDs {
 			return conv
 		}
 	}
@@ -321,7 +323,7 @@ func (mom *Mother) findConversationByUsers(slackIDs []string) *Conversation {
 func (mom *Mother) findConversationByTimestamp(timestamp string, loadExpired bool) *Conversation {
 	for i := range mom.Conversations {
 		conv := &mom.Conversations[i]
-		if conv.active && conv.hasLog(timestamp) {
+		if conv.Active && conv.hasLog(timestamp) {
 			return conv
 		}
 	}

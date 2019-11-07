@@ -54,22 +54,23 @@ func getSlackID(tagged string) string {
 func cmdActive(mom *Mother, params cmdParams) bool {
 	active := []string{mom.getMsg("cmdActive")}
 	for _, conv := range mom.Conversations {
-		if conv.active {
-			tagged := make([]string, 0)
-			for _, slackID := range strings.Split(conv.SlackIDs, ",") {
-				tagged = append(tagged, fmt.Sprintf("<@%s>", slackID))
-			}
-			// Get how much time is left before conversation expires
-			timeout := time.Duration(mom.config.SessionTimeout) * time.Second
-			timeout -= time.Now().Sub(conv.UpdatedAt)
-			line := fmt.Sprintf(
-				mom.getMsg("cmdActiveElement"),
-				mom.getMessageLink(conv.ThreadID),
-				strings.Join(tagged, ", "),
-				timeout.Round(time.Second),
-			)
-			active = append(active, line)
+		if !conv.Active {
+			continue
 		}
+		tagged := make([]string, 0)
+		for _, slackID := range strings.Split(conv.SlackIDs, ",") {
+			tagged = append(tagged, fmt.Sprintf("<@%s>", slackID))
+		}
+		// Get how much time is left before conversation expires
+		timeout := time.Duration(mom.config.SessionTimeout) * time.Second
+		timeout -= time.Now().Sub(conv.UpdatedAt)
+		line := fmt.Sprintf(
+			mom.getMsg("cmdActiveElement"),
+			mom.getMessageLink(conv.ThreadID),
+			strings.Join(tagged, ", "),
+			timeout.Round(time.Second),
+		)
+		active = append(active, line)
 	}
 	if len(active) == 1 {
 		active = append(active, mom.getMsg("listNone"))
