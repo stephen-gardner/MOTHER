@@ -35,6 +35,7 @@ type (
 )
 
 func (conv *Conversation) addLog(entry *MessageLog) {
+	entry.Msg = conv.mom.translateSlackIDs(entry.Msg)
 	err := db.
 		Model(conv).
 		Association("MessageLogs").

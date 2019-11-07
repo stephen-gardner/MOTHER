@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"regexp"
 	"sort"
 	"strings"
 	"time"
@@ -19,7 +20,7 @@ type (
 		Conversations    []Conversation
 		BlacklistedUsers []BlacklistedUser
 		chanInfo         map[string]*slack.Channel `gorm:"-"`
-		usersInfo        map[string]*slack.User    `gorm:"-"`
+		usersInfo        map[string]UserInfo       `gorm:"-"`
 		invited          []string                  `gorm:"-"`
 		config           botConfig                 `gorm:"-"`
 		log              *log.Logger               `gorm:"-"`
@@ -35,6 +36,11 @@ type (
 		MotherID uint
 		SlackID  string
 	}
+
+	UserInfo struct {
+		info      *slack.User
+		updatedAt time.Time
+	}
 )
 
 func getMother(botName string, config botConfig) (*Mother, error) {
@@ -43,7 +49,7 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 		config:    config,
 		log:       log.New(os.Stdout, botName+": ", log.LstdFlags),
 		chanInfo:  make(map[string]*slack.Channel),
-		usersInfo: make(map[string]*slack.User),
+		usersInfo: make(map[string]UserInfo),
 		invited:   make([]string, 0),
 		reload:    false,
 	}
@@ -85,14 +91,14 @@ func (mom *Mother) connect() {
 		mom.events = make(chan slack.RTMEvent)
 		defer close(mom.events)
 		go handleEvents(mom)
-		reapTicker := time.NewTicker(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
+		scrubTicker := time.NewTicker(time.Duration(mom.config.TimeoutCheckInterval) * time.Second)
 		for {
 			select {
 			// Forwards events from Slack API library to allow us to mix in our own events
 			case msg := <-mom.rtm.IncomingEvents:
 				mom.events <- msg
-			// Queues event to perform conversation reaping every TimeoutCheckInterval
-			case <-reapTicker.C:
+			// Queues scrub event every TimeoutCheckInterval
+			case <-scrubTicker.C:
 				mom.events <- slack.RTMEvent{
 					Type: "scrub",
 					Data: &scrubEvent{Type: "scrub"},
@@ -363,14 +369,21 @@ func (mom *Mother) getChannelInfo(chanID string) (*slack.Channel, error) {
 
 func (mom *Mother) getUserInfo(slackID string) (*slack.User, error) {
 	if userInfo, present := mom.usersInfo[slackID]; present {
-		return userInfo, nil
+		return userInfo.info, nil
 	}
-	userInfo, err := mom.rtm.GetUserInfo(slackID)
-	if err != nil {
-		return nil, err
+	info, err := mom.rtm.GetUserInfo(slackID)
+	if err == nil {
+		mom.usersInfo[slackID] = UserInfo{info: info, updatedAt: time.Now()}
 	}
-	mom.usersInfo[slackID] = userInfo
-	return userInfo, nil
+	return info, err
+}
+
+func (mom *Mother) pruneUsers() {
+	for key, userInfo := range mom.usersInfo {
+		if int64(time.Now().Sub(userInfo.updatedAt).Seconds()) >= mom.config.SessionTimeout {
+			delete(mom.usersInfo, key)
+		}
+	}
 }
 
 func (mom *Mother) hasMember(slackID string) bool {
@@ -488,6 +501,24 @@ func (mom *Mother) spoofAvailability() {
 		mom.log.Println(err)
 	}
 	mom.rtm.SendMessage(mom.rtm.NewTypingMessage(dummy.ID))
+}
+
+func (mom *Mother) translateSlackIDs(msg string) string {
+	rgx := regexp.MustCompile("<@(.*?)>")
+	for {
+		res := rgx.FindStringSubmatch(msg)
+		if res == nil {
+			break
+		}
+		user, err := mom.getUserInfo(res[1])
+		if err != nil {
+			mom.log.Println(err)
+			break
+		}
+		translated := fmt.Sprintf("@%s[%s]", user.Profile.DisplayName, res[1])
+		msg = strings.ReplaceAll(msg, res[0], translated)
+	}
+	return msg
 }
 
 func (mom *Mother) getMsg(key string) string {
