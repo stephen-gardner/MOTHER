@@ -81,16 +81,19 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 }
 
 func cmdBlacklist(mom *Mother, params cmdParams) bool {
+	// Print list of blacklisted users without parameters
 	if len(params.args) == 0 {
 		tagged := make([]string, 0)
 		for _, bu := range mom.BlacklistedUsers {
 			tagged = append(tagged, fmt.Sprintf("<@%s>", bu.SlackID))
 		}
-		sort.Strings(tagged) // It won't be alphabetical, but at least keeps the list order consistent
+		// It won't be alphabetical, but at least keeps the list order consistent
+		sort.Strings(tagged)
 		msg := mom.getMsg("cmdBlacklist") + strings.Join(tagged, ", ")
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
+	// Flag that the operation is a removal
 	rm := false
 	if params.args[0] == "rm" {
 		if len(params.args) < 2 {
@@ -99,6 +102,8 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		rm = true
 		params.args = params.args[1:]
 	}
+	// Build list of slack IDs to add/remove
+	// Can not add/remove other bots, the sender, or redundant IDs
 	slackIDs := make([]string, 0)
 	for _, tagged := range params.args {
 		ID := getSlackID(tagged)

@@ -169,6 +169,7 @@ func (mom *Mother) removeBlacklistedUser(slackID string) bool {
 
 func (mom *Mother) createConversation(directID string, slackIDs []string, notifyUsers bool) (*Conversation, error) {
 	sort.Strings(slackIDs)
+	serialized := strings.Join(slackIDs, ",")
 	tagged := make([]string, 0)
 	for _, ID := range slackIDs {
 		tagged = append(tagged, fmt.Sprintf("<@%s>", ID))
@@ -180,12 +181,13 @@ func (mom *Mother) createConversation(directID string, slackIDs []string, notify
 	}
 	conv := &Conversation{
 		MotherID: mom.ID,
-		SlackIDs: strings.Join(slackIDs, ","),
+		SlackIDs: serialized,
 		DirectID: directID,
 		ThreadID: threadID,
 	}
 	conv.init(mom)
-	if _, err := mom.trackConversation(conv); err != nil {
+	contextSwitch, err := mom.trackConversation(conv)
+	if err != nil {
 		if _, _, err := mom.rtm.DeleteMessage(mom.config.ChanID, threadID); err != nil {
 			// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
 			// messages to an inactive thread, but the chances of this many things suddenly going wrong is extremely
@@ -194,7 +196,23 @@ func (mom *Mother) createConversation(directID string, slackIDs []string, notify
 		}
 		return nil, err
 	}
-	if _, err := conv.postMessageToThread(fmt.Sprintf(mom.getMsg("sessionStartConv"), conv.ThreadID)); err != nil {
+	msg := fmt.Sprintf(mom.getMsg("sessionStartConv"), conv.ThreadID)
+	if !contextSwitch {
+		var prev []Conversation
+		err = db.
+			Where("mother_id = ? AND slack_ids = ?", mom.ID, serialized).
+			Order("updated_at desc, id desc").
+			Limit(2).
+			Find(&prev).Error
+		if err != nil {
+			if err != gorm.ErrRecordNotFound {
+				mom.log.Println(err)
+			}
+		} else if len(prev) == 2 {
+			msg += fmt.Sprintf("\n>_*Previous session: %s*_", mom.getMessageLink(prev[1].ThreadID))
+		}
+	}
+	if _, err := conv.postMessageToThread(msg); err != nil {
 		mom.log.Println(err)
 	}
 	if notifyUsers {
@@ -231,6 +249,7 @@ func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
 	); err != nil {
 		return nil, err
 	}
+	conv.update()
 	prev, err := conv.mom.trackConversation(conv)
 	if err != nil {
 		return nil, err
@@ -259,6 +278,9 @@ func (mom *Mother) trackConversation(conv *Conversation) (bool, error) {
 		return false, err
 	}
 	if prev != nil {
+		if err := prev.setActive(false); err != nil {
+			mom.log.Println(err)
+		}
 		link := mom.getMessageLink(conv.ThreadID)
 		prev.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedTo"), link))
 		link = mom.getMessageLink(prev.ThreadID)

@@ -204,11 +204,19 @@ func (conv *Conversation) init(mom *Mother) {
 	}
 }
 
+func (conv *Conversation) setActive(state bool) error {
+	var err error
+	if conv.Active != state {
+		err = db.
+			Model(conv).
+			UpdateColumn("active", state).Error
+		conv.Active = state
+	}
+	return err
+}
+
 func (conv *Conversation) expire() {
-	err := db.
-		Model(conv).
-		Update("active", false).Error
-	if err != nil {
+	if err := conv.setActive(false); err != nil {
 		conv.mom.log.Println(err)
 	}
 	conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
@@ -216,10 +224,15 @@ func (conv *Conversation) expire() {
 }
 
 func (conv *Conversation) update() {
+	now := time.Now()
 	err := db.
 		Model(conv).
-		Update("updated_at", time.Now()).Error
+		Update("updated_at", now).Error
 	if err != nil {
+		conv.mom.log.Println(err)
+	}
+	conv.UpdatedAt = now
+	if err = conv.setActive(true); err != nil {
 		conv.mom.log.Println(err)
 	}
 }
