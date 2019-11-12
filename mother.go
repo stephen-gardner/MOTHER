@@ -402,12 +402,18 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent, sender *slack.User, forceT
 	}
 }
 
-func (mom *Mother) spoofAvailability() {
-	dummy, _, _, err := mom.rtm.OpenConversation(&slack.OpenConversationParameters{Users: []string{"USLACKBOT"}})
-	if err != nil {
-		mom.log.Println(err)
+func (mom *Mother) spoofAvailability(dummyChanID *string) {
+	if dummyChanID == nil {
+		dummy, _, _, err := mom.rtm.OpenConversation(
+			&slack.OpenConversationParameters{Users: []string{"USLACKBOT"}},
+		)
+		if err != nil {
+			mom.log.Println(err)
+			return
+		}
+		dummyChanID = &dummy.ID
 	}
-	mom.rtm.SendMessage(mom.rtm.NewTypingMessage(dummy.ID))
+	mom.rtm.SendMessage(mom.rtm.NewTypingMessage(*dummyChanID))
 }
 
 func (mom *Mother) translateSlackIDs(msg string) string {

@@ -281,6 +281,7 @@ func handleUserTypingEvent(mom *Mother, ev *slack.UserTypingEvent) {
 }
 
 func handleEvents(mom *Mother) {
+	var dummyChanID *string
 	for msg := range mom.events {
 		switch ev := msg.Data.(type) {
 		case *blacklistEvent:
@@ -289,7 +290,7 @@ func handleEvents(mom *Mother) {
 		case *scrubEvent:
 			mom.reapConversations()
 			mom.pruneUsers()
-			mom.spoofAvailability()
+			mom.spoofAvailability(dummyChanID)
 
 		case *slack.ChannelJoinedEvent:
 			handleChannelJoinedEvent(mom, ev)
