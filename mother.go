@@ -167,128 +167,6 @@ func (mom *Mother) removeBlacklistedUser(slackID string) bool {
 	return false
 }
 
-func (mom *Mother) createConversation(directID string, slackIDs []string, notifyUsers bool) (*Conversation, error) {
-	sort.Strings(slackIDs)
-	serialized := strings.Join(slackIDs, ",")
-	tagged := make([]string, 0)
-	for _, ID := range slackIDs {
-		tagged = append(tagged, fmt.Sprintf("<@%s>", ID))
-	}
-	notice := fmt.Sprintf(mom.getMsg("sessionNotice"), strings.Join(tagged, ", "))
-	threadID, err := mom.postMessage(mom.config.ChanID, "", notice)
-	if err != nil {
-		return nil, err
-	}
-	conv := &Conversation{
-		MotherID: mom.ID,
-		SlackIDs: serialized,
-		DirectID: directID,
-		ThreadID: threadID,
-	}
-	conv.init(mom)
-	contextSwitch, err := mom.trackConversation(conv)
-	if err != nil {
-		if _, _, err := mom.rtm.DeleteMessage(mom.config.ChanID, threadID); err != nil {
-			// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
-			// messages to an inactive thread, but the chances of this many things suddenly going wrong is extremely
-			// unlikely
-			mom.log.Println(err)
-		}
-		return nil, err
-	}
-	msg := fmt.Sprintf(mom.getMsg("sessionStartConv"), conv.ThreadID)
-	if !contextSwitch {
-		var prev []Conversation
-		err = db.
-			Where("mother_id = ? AND slack_ids = ?", mom.ID, serialized).
-			Order("updated_at desc, id desc").
-			Limit(2).
-			Find(&prev).Error
-		if err != nil {
-			if err != gorm.ErrRecordNotFound {
-				mom.log.Println(err)
-			}
-		} else if len(prev) == 2 {
-			msg += fmt.Sprintf("\n>_*Previous session: %s*_", mom.getMessageLink(prev[1].ThreadID))
-		}
-	}
-	if _, err := conv.postMessageToThread(msg); err != nil {
-		mom.log.Println(err)
-	}
-	if notifyUsers {
-		conv.sendMessageToDM(mom.getMsg("sessionStartDirect"))
-	}
-	return conv, nil
-}
-
-func (mom *Mother) loadConversation(threadID string) (*Conversation, error) {
-	conv := &Conversation{}
-	conv.init(mom)
-	err := db.
-		Where("mother_id = ? AND thread_id = ?", mom.ID, threadID).
-		Preload("MessageLogs").
-		First(conv).Error
-	if err != nil {
-		if gorm.IsRecordNotFoundError(err) {
-			return nil, nil
-		}
-		return nil, err
-	}
-	for _, slackID := range strings.Split(conv.SlackIDs, ",") {
-		// Prevent reactivating conversations with channel members or blacklisted users
-		if mom.hasMember(slackID) || mom.isBlacklisted(slackID) {
-			return nil, nil
-		}
-	}
-	if _, _, _, err := mom.rtm.OpenConversation(
-		&slack.OpenConversationParameters{
-			ChannelID: conv.DirectID,
-			ReturnIM:  true,
-			Users:     nil,
-		},
-	); err != nil {
-		return nil, err
-	}
-	conv.update()
-	prev, err := conv.mom.trackConversation(conv)
-	if err != nil {
-		return nil, err
-	}
-	if !prev {
-		conv.sendMessageToThread(conv.mom.getMsg("sessionResumeConv"))
-		conv.sendMessageToDM(conv.mom.getMsg("sessionResumeDirect"))
-	}
-	return conv, nil
-}
-
-func (mom *Mother) trackConversation(conv *Conversation) (bool, error) {
-	var prev *Conversation
-	for i, p := range mom.Conversations {
-		if mom.Conversations[i].Active && mom.Conversations[i].DirectID == conv.DirectID {
-			prev = &p
-			mom.Conversations = append(mom.Conversations[:i], mom.Conversations[i+1:]...)
-			break
-		}
-	}
-	err := db.
-		Model(mom).
-		Association("Conversations").
-		Append(conv).Error
-	if err != nil {
-		return false, err
-	}
-	if prev != nil {
-		if err := prev.setActive(false); err != nil {
-			mom.log.Println(err)
-		}
-		link := mom.getMessageLink(conv.ThreadID)
-		prev.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedTo"), link))
-		link = mom.getMessageLink(prev.ThreadID)
-		conv.sendMessageToThread(fmt.Sprintf(mom.getMsg("sessionContextSwitchedFrom"), link))
-	}
-	return prev != nil, nil
-}
-
 func (mom *Mother) deactivateConversations(slackID string) {
 	for i := range mom.Conversations {
 		conv := &mom.Conversations[i]
@@ -352,9 +230,14 @@ func (mom *Mother) findConversationByTimestamp(timestamp string, loadExpired boo
 	if !loadExpired {
 		return nil
 	}
-	conv, err := mom.loadConversation(timestamp)
+	conv, err := mom.
+		newConversation().
+		loadConversation(timestamp).
+		create()
 	if err != nil {
-		mom.log.Println(err)
+		if err != gorm.ErrRecordNotFound && err != ErrUserNotAllowed {
+			mom.log.Println(err)
+		}
 		return nil
 	}
 	return conv

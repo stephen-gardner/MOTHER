@@ -194,10 +194,10 @@ func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, remo
 }
 
 func (conv *Conversation) init(mom *Mother) {
+	conv.Active = true
 	conv.mom = mom
 	conv.convIndex = make(map[string]string)
 	conv.directIndex = make(map[string]string)
-	conv.Active = true
 	for _, entry := range conv.MessageLogs {
 		conv.directIndex[entry.DirectTimestamp] = entry.ConvTimestamp
 		conv.convIndex[entry.ConvTimestamp] = entry.DirectTimestamp

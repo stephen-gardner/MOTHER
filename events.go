@@ -87,7 +87,11 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 	var err error
 	conv := mom.findConversationByChannel(ev.Channel)
 	if conv == nil {
-		if conv, err = mom.createConversation(ev.Channel, chanInfo.Members, true); err != nil {
+		conv, err = mom.
+			newConversation().
+			postNewThread(ev.Channel, chanInfo.Members).
+			create()
+		if err != nil {
 			mom.log.Println(err)
 			return
 		}

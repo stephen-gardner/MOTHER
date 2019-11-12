@@ -174,28 +174,32 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 		}
 		slackIDs = append(slackIDs, ID)
 	}
-	if conv := mom.findConversationByUsers(slackIDs); conv == nil {
-		dm, _, _, err := mom.rtm.OpenConversation(
-			&slack.OpenConversationParameters{
-				ChannelID: "",
-				ReturnIM:  true,
-				Users:     slackIDs,
-			},
-		)
+	if conv := mom.findConversationByUsers(slackIDs); conv != nil {
+		// If an active conversation already exists, !contact simply spawns a fresher one
+		_, err := mom.
+			newConversation().
+			postNewThread(conv.DirectID, slackIDs).
+			create()
 		if err != nil {
 			mom.log.Println(err)
 			return false
 		}
-		if _, err := mom.createConversation(dm.ID, slackIDs, true); err != nil {
-			mom.log.Println(err)
-			return false
-		}
-	} else {
-		// If an active conversation already exists, !contact simply spawns a fresher one
-		if _, err := mom.createConversation(conv.DirectID, slackIDs, false); err != nil {
-			mom.log.Println(err)
-			return false
-		}
+		return true
+	}
+	dm, _, _, err := mom.rtm.OpenConversation(
+		&slack.OpenConversationParameters{Users: slackIDs},
+	)
+	if err != nil {
+		mom.log.Println(err)
+		return false
+	}
+	_, err = mom.
+		newConversation().
+		postNewThread(dm.ID, slackIDs).
+		create()
+	if err != nil {
+		mom.log.Println(err)
+		return false
 	}
 	return true
 }
@@ -398,7 +402,10 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 		if conv = mom.findConversationByTimestamp(params.args[0], true); conv == nil {
 			return false
 		}
-	} else if ID != "" {
+	} else {
+		if ID == "" {
+			return false
+		}
 		slackIDs := make([]string, 0)
 		for _, tagged := range params.args {
 			ID = getSlackID(tagged)
@@ -407,31 +414,28 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 			}
 			slackIDs = append(slackIDs, ID)
 		}
-		if conv = mom.findConversationByUsers(slackIDs); conv == nil {
-			var err error
-			conv = &Conversation{}
-			sort.Strings(slackIDs)
-			err = db.
-				Where("mother_id = ? AND slack_ids = ?", mom.ID, strings.Join(slackIDs, ",")).
-				Order("updated_at desc, id desc").
-				First(conv).Error
-			if err != nil {
-				if err != gorm.ErrRecordNotFound {
-					mom.log.Println(err)
-				}
-				return false
-			}
-			if conv, err = mom.loadConversation(conv.ThreadID); err != nil {
+		conv = &Conversation{}
+		sort.Strings(slackIDs)
+		err := db.
+			Where("mother_id = ? AND slack_ids = ?", mom.ID, strings.Join(slackIDs, ",")).
+			Order("updated_at desc, id desc").
+			First(conv).Error
+		if err != nil {
+			if err != gorm.ErrRecordNotFound {
 				mom.log.Println(err)
-				return false
 			}
+			return false
 		}
-	} else {
-		return false
 	}
-	_, err := mom.createConversation(conv.DirectID, strings.Split(conv.SlackIDs, ","), false)
+	_, err := mom.
+		newConversation().
+		loadConversation(conv.ThreadID).
+		postNewThread("", nil).
+		create()
 	if err != nil {
-		mom.log.Println(err)
+		if err != gorm.ErrRecordNotFound && err != ErrUserNotAllowed {
+			mom.log.Println(err)
+		}
 		return false
 	}
 	return true
