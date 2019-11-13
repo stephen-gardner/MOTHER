@@ -51,27 +51,31 @@ func getSlackID(tagged string) string {
 	return res[1]
 }
 
+// Lists currently active conversations
 func cmdActive(mom *Mother, params cmdParams) bool {
-	active := []string{mom.getMsg("cmdActive")}
+	active := make([]string, len(mom.Conversations)+1)
+	active[0] = mom.getMsg("cmdActive")
+	i := 1
 	for _, conv := range mom.Conversations {
 		if !conv.Active {
 			continue
 		}
-		tagged := make([]string, 0)
-		for _, slackID := range strings.Split(conv.SlackIDs, ",") {
-			tagged = append(tagged, fmt.Sprintf("<@%s>", slackID))
+		tagged := strings.Split(conv.SlackIDs, ",")
+		for i, ID := range tagged {
+			tagged[i] = fmt.Sprintf("<@%s>", ID)
 		}
 		// Get how much time is left before conversation expires
 		timeout := time.Duration(mom.config.SessionTimeout) * time.Second
 		timeout -= time.Now().Sub(conv.UpdatedAt)
-		line := fmt.Sprintf(
+		active[i] = fmt.Sprintf(
 			mom.getMsg("cmdActiveElement"),
 			mom.getMessageLink(conv.ThreadID),
 			strings.Join(tagged, ", "),
 			timeout.Round(time.Second),
 		)
-		active = append(active, line)
+		i++
 	}
+	active = active[:i]
 	if len(active) == 1 {
 		active = append(active, mom.getMsg("listNone"))
 	}
@@ -83,9 +87,9 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 func cmdBlacklist(mom *Mother, params cmdParams) bool {
 	// Print list of blacklisted users without parameters
 	if len(params.args) == 0 {
-		tagged := make([]string, 0)
-		for _, bu := range mom.BlacklistedUsers {
-			tagged = append(tagged, fmt.Sprintf("<@%s>", bu.SlackID))
+		tagged := make([]string, len(mom.BlacklistedUsers))
+		for i, bu := range mom.BlacklistedUsers {
+			tagged[i] = fmt.Sprintf("<@%s>", bu.SlackID)
 		}
 		// It won't be alphabetical, but at least keeps the list order consistent
 		sort.Strings(tagged)
@@ -112,14 +116,16 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		if !isBot {
 			mothers.Range(func(_, value interface{}) bool {
 				other := value.(*Mother)
-				if other.rtm.GetInfo().User.ID == ID {
-					isBot = true
-					return false
+				if other.rtm.GetInfo().Team.ID == mom.rtm.GetInfo().Team.ID {
+					if other.rtm.GetInfo().User.ID == ID {
+						isBot = true
+						return false
+					}
 				}
 				return true
 			})
 		}
-		if ID == "" || ID == params.userID || (rm && !listed) || (!rm && listed) || isBot {
+		if ID == "" || ID == params.userID || (!rm && listed) || (rm && (!listed || isBot)) {
 			return false
 		}
 		slackIDs = append(slackIDs, ID)
@@ -135,6 +141,7 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 	return res
 }
 
+// Deactivates conversation specified by threadID/users
 func cmdClose(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
@@ -162,6 +169,7 @@ func cmdClose(mom *Mother, params cmdParams) bool {
 	return true
 }
 
+// Starts conversation with specified users
 func cmdContact(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
@@ -174,8 +182,8 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 		}
 		slackIDs = append(slackIDs, ID)
 	}
+	// If an active conversation already exists, !contact simply spawns a new thread
 	if conv := mom.findConversationByUsers(slackIDs); conv != nil {
-		// If an active conversation already exists, !contact simply spawns a fresher one
 		_, err := mom.
 			newConversation().
 			postNewThread(conv.DirectID, slackIDs).
@@ -199,9 +207,8 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 		create()
 	if err != nil {
 		mom.log.Println(err)
-		return false
 	}
-	return true
+	return err == nil
 }
 
 func cmdHelp(mom *Mother, params cmdParams) bool {
@@ -230,12 +237,11 @@ func cmdHelp(mom *Mother, params cmdParams) bool {
 
 // Display paginated log of recent threads
 func cmdHistory(mom *Mother, params cmdParams) bool {
-	var convos []Conversation
-	slackIDs := make([]string, 0)
+	var slackIDs []string
 	page := 1
 	if len(params.args) > 0 {
-		for i := 0; i < len(params.args); i++ {
-			ID := getSlackID(params.args[i])
+		for _, tagged := range params.args {
+			ID := getSlackID(tagged)
 			if ID == "" {
 				break
 			}
@@ -246,10 +252,11 @@ func cmdHistory(mom *Mother, params cmdParams) bool {
 	}
 	if len(params.args) > 0 {
 		var err error
-		if page, err = strconv.Atoi(params.args[0]); err != nil || page < 0 {
+		if page, err = strconv.Atoi(params.args[0]); err != nil || page < 1 {
 			return false
 		}
 	}
+	var convos []Conversation
 	var err error
 	if len(slackIDs) > 0 {
 		err = db.
@@ -270,21 +277,26 @@ func cmdHistory(mom *Mother, params cmdParams) bool {
 		mom.log.Println(err)
 		return false
 	}
-	threads := []string{fmt.Sprintf(mom.getMsg("cmdHistory"), page)}
+	threads := make([]string, len(convos)+1)
+	threads[0] = fmt.Sprintf(mom.getMsg("cmdHistory"), page)
+	i := 1
 	for _, conv := range convos {
-		users := strings.Split(conv.SlackIDs, ",")
-		for i, ID := range users {
-			users[i] = fmt.Sprintf("<@%s>", ID)
+		tagged := strings.Split(conv.SlackIDs, ",")
+		for i, ID := range tagged {
+			tagged[i] = fmt.Sprintf("<@%s>", ID)
 		}
-		line := fmt.Sprintf(
+		threads[i] = fmt.Sprintf(
 			mom.getMsg("cmdHistoryElement"),
 			mom.getMessageLink(conv.ThreadID),
-			strings.Join(users, ", "),
+			strings.Join(tagged, ", "),
 			conv.UpdatedAt,
 		)
-		threads = append(threads, line)
+		i++
 	}
 	if len(convos) == 0 {
+		if page > 1 {
+			return false
+		}
 		threads = append(threads, mom.getMsg("listNone"))
 	}
 	msg := strings.Join(threads, "\n")
@@ -292,6 +304,7 @@ func cmdHistory(mom *Mother, params cmdParams) bool {
 	return true
 }
 
+// Invites users to member channel
 func cmdInvite(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
@@ -309,9 +322,10 @@ func cmdInvite(mom *Mother, params cmdParams) bool {
 	if err != nil {
 		mom.log.Println(err)
 	}
-	return true
+	return err == nil
 }
 
+// Upload conversation logs for specified threadID/users
 func cmdLogs(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
@@ -350,6 +364,8 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 	for _, conv := range convos {
 		if !first {
 			buff.WriteRune('\n')
+		} else {
+			first = false
 		}
 		buff.WriteString(fmt.Sprintf(mom.getMsg("cmdLogsThread"), conv.ThreadID))
 		for _, msg := range conv.MessageLogs {
@@ -359,9 +375,9 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 					mom.log.Println(err)
 					return false
 				}
+				var format string
 				epoch, _ := strconv.ParseInt(strings.Split(msg.ConvTimestamp, ".")[0], 10, 64)
 				timestamp := time.Unix(epoch, 0).String()
-				format := ""
 				if msg.Original {
 					format = mom.getMsg("cmdLogsMsg")
 				} else {
@@ -370,7 +386,6 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 				buff.WriteString(fmt.Sprintf(format, timestamp, userInfo.Profile.DisplayName, msg.Msg))
 			}
 		}
-		first = false
 	}
 	if buff.Len() == 0 {
 		msg := mom.getMsg("cmdLogsNoRecords")
@@ -387,11 +402,11 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 	)
 	if err != nil {
 		mom.log.Println(err)
-		return false
 	}
-	return true
+	return err == nil
 }
 
+// Resumes conversation session specified by threadID/users
 func cmdResume(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
@@ -436,9 +451,8 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 		if err != gorm.ErrRecordNotFound && err != ErrUserNotAllowed {
 			mom.log.Println(err)
 		}
-		return false
 	}
-	return true
+	return err == nil
 }
 
 // Loads bot with given name

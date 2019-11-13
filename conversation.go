@@ -215,6 +215,27 @@ func (conv *Conversation) setActive(state bool) error {
 	return err
 }
 
+func (conv *Conversation) abandon() {
+	for i, c := range conv.mom.Conversations {
+		if c.ThreadID != conv.ThreadID {
+			continue
+		}
+		conv.mom.Conversations = append(conv.mom.Conversations[:i], conv.mom.Conversations[i+1:]...)
+		if conv.Active {
+			if err := conv.setActive(false); err != nil {
+				conv.mom.log.Println(err)
+			}
+		}
+		break
+	}
+	if _, _, err := conv.mom.rtm.DeleteMessage(conv.mom.config.ChanID, conv.ThreadID); err != nil {
+		// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
+		// messages to an inactive thread, but the chances of this many things suddenly going wrong is extremely
+		// unlikely
+		conv.mom.log.Println(err)
+	}
+}
+
 func (conv *Conversation) expire() {
 	if err := conv.setActive(false); err != nil {
 		conv.mom.log.Println(err)

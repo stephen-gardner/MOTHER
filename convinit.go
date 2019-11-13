@@ -94,15 +94,6 @@ func (ctx *convInitContext) loadConversation(threadID string) *convInitContext {
 	return ctx
 }
 
-func abandonConversation(ctx *convInitContext) {
-	if _, _, err := ctx.mom.rtm.DeleteMessage(ctx.mom.config.ChanID, ctx.conv.ThreadID); err != nil {
-		// In the worst case, this could result in an ugly situation where channel members are unknowingly sending
-		// messages to an inactive thread, but the chances of this many things suddenly going wrong is extremely
-		// unlikely
-		ctx.mom.log.Println(err)
-	}
-}
-
 func findPreviousConv(ctx *convInitContext) {
 	for _, prev := range ctx.mom.Conversations {
 		if prev.Active && prev.DirectID == ctx.conv.DirectID {
@@ -156,13 +147,14 @@ func resumeNotice(ctx *convInitContext) {
 func switchContext(ctx *convInitContext) {
 	// Remove previous context from tracked conversations
 	for i, prev := range ctx.mom.Conversations {
-		if prev.Active && prev.ThreadID == ctx.prev.ThreadID {
-			ctx.mom.Conversations = append(ctx.mom.Conversations[:i], ctx.mom.Conversations[i+1:]...)
-			if err := ctx.prev.setActive(false); err != nil {
-				ctx.mom.log.Println(err)
-			}
-			break
+		if prev.ThreadID != ctx.prev.ThreadID {
+			continue
 		}
+		ctx.mom.Conversations = append(ctx.mom.Conversations[:i], ctx.mom.Conversations[i+1:]...)
+		if err := ctx.prev.setActive(false); err != nil {
+			ctx.mom.log.Println(err)
+		}
+		break
 	}
 	if (ctx.resumed && !ctx.newThread) || !ctx.resumed {
 		link := ctx.mom.getMessageLink(ctx.conv.ThreadID)
@@ -178,7 +170,7 @@ func (ctx *convInitContext) create() (*Conversation, error) {
 	}
 	if ctx.err != nil {
 		if ctx.newThread {
-			abandonConversation(ctx)
+			ctx.conv.abandon()
 		}
 		return nil, ctx.err
 	}
@@ -188,7 +180,7 @@ func (ctx *convInitContext) create() (*Conversation, error) {
 		Append(ctx.conv).Error
 	if err != nil {
 		if ctx.newThread {
-			abandonConversation(ctx)
+			ctx.conv.abandon()
 		}
 		return nil, err
 	}
