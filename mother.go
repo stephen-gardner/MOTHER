@@ -19,16 +19,16 @@ type (
 		Name             string
 		Conversations    []Conversation
 		BlacklistedUsers []BlacklistedUser
-		chanInfo         map[string]*slack.Channel `gorm:"-"`
-		usersInfo        map[string]UserInfo       `gorm:"-"`
-		invited          []string                  `gorm:"-"`
-		config           botConfig                 `gorm:"-"`
-		log              *log.Logger               `gorm:"-"`
-		rtm              *slack.RTM                `gorm:"-"`
-		events           chan slack.RTMEvent       `gorm:"-"`
-		shutdown         chan struct{}             `gorm:"-"`
-		connectedAt      time.Time                 `gorm:"-"`
-		reload           bool                      `gorm:"-"`
+		chanInfo         map[string]expirable `gorm:"-"`
+		usersInfo        map[string]expirable `gorm:"-"`
+		invited          []string             `gorm:"-"`
+		config           botConfig            `gorm:"-"`
+		log              *log.Logger          `gorm:"-"`
+		rtm              *slack.RTM           `gorm:"-"`
+		events           chan slack.RTMEvent  `gorm:"-"`
+		shutdown         chan struct{}        `gorm:"-"`
+		connectedAt      time.Time            `gorm:"-"`
+		reload           bool                 `gorm:"-"`
 	}
 
 	BlacklistedUser struct {
@@ -37,8 +37,8 @@ type (
 		SlackID  string
 	}
 
-	UserInfo struct {
-		info      *slack.User
+	expirable struct {
+		data      interface{}
 		updatedAt time.Time
 	}
 )
@@ -48,8 +48,8 @@ func getMother(botName string, config botConfig) (*Mother, error) {
 		Name:      botName,
 		config:    config,
 		log:       log.New(os.Stdout, botName+": ", log.LstdFlags),
-		chanInfo:  make(map[string]*slack.Channel),
-		usersInfo: make(map[string]UserInfo),
+		chanInfo:  make(map[string]expirable),
+		usersInfo: make(map[string]expirable),
 		invited:   make([]string, 0),
 		reload:    false,
 	}
@@ -191,7 +191,6 @@ func (mom *Mother) reapConversations() {
 			i++
 			continue
 		}
-		delete(mom.chanInfo, conv.DirectID)
 		if conv.Active {
 			conv.expire()
 		}
@@ -245,7 +244,7 @@ func (mom *Mother) findConversationByTimestamp(timestamp string, loadExpired boo
 
 func (mom *Mother) getChannelInfo(chanID string) (*slack.Channel, error) {
 	if chanInfo, present := mom.chanInfo[chanID]; present {
-		return chanInfo, nil
+		return chanInfo.data.(*slack.Channel), nil
 	}
 	chanInfo, err := mom.rtm.GetConversationInfo(chanID, false)
 	if err != nil {
@@ -270,25 +269,25 @@ func (mom *Mother) getChannelInfo(chanID string) (*slack.Channel, error) {
 	}
 	sort.Strings(members)
 	chanInfo.Members = members
-	mom.chanInfo[chanID] = chanInfo
+	mom.chanInfo[chanID] = expirable{data: chanInfo, updatedAt: time.Now()}
 	return chanInfo, nil
 }
 
 func (mom *Mother) getUserInfo(slackID string) (*slack.User, error) {
 	if userInfo, present := mom.usersInfo[slackID]; present {
-		return userInfo.info, nil
+		return userInfo.data.(*slack.User), nil
 	}
 	info, err := mom.rtm.GetUserInfo(slackID)
 	if err == nil {
-		mom.usersInfo[slackID] = UserInfo{info: info, updatedAt: time.Now()}
+		mom.usersInfo[slackID] = expirable{data: info, updatedAt: time.Now()}
 	}
 	return info, err
 }
 
-func (mom *Mother) pruneUsers() {
-	for key, userInfo := range mom.usersInfo {
-		if int64(time.Now().Sub(userInfo.updatedAt).Seconds()) >= mom.config.SessionTimeout {
-			delete(mom.usersInfo, key)
+func (mom *Mother) pruneExpired(dataMap map[string]expirable) {
+	for key, data := range dataMap {
+		if int64(time.Now().Sub(data.updatedAt).Seconds()) >= mom.config.SessionTimeout {
+			delete(dataMap, key)
 		}
 	}
 }

@@ -289,7 +289,8 @@ func handleEvents(mom *Mother) {
 
 		case *scrubEvent:
 			mom.reapConversations()
-			mom.pruneUsers()
+			mom.pruneExpired(mom.chanInfo)
+			mom.pruneExpired(mom.usersInfo)
 			mom.spoofAvailability(dummyChanID)
 
 		case *slack.ChannelJoinedEvent:
