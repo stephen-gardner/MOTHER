@@ -176,6 +176,7 @@ func (mom *Mother) deactivateConversations(slackID string) {
 		for _, ID := range strings.Split(conv.SlackIDs, ",") {
 			if ID == slackID {
 				conv.expire()
+				break
 			}
 		}
 	}
@@ -199,9 +200,10 @@ func (mom *Mother) reapConversations() {
 }
 
 func (mom *Mother) findConversationByChannel(directID string) *Conversation {
-	for _, conv := range mom.Conversations {
+	for i := range mom.Conversations {
+		conv := &mom.Conversations[i]
 		if conv.Active && conv.DirectID == directID {
-			return &conv
+			return conv
 		}
 	}
 	return nil
@@ -334,10 +336,7 @@ func (mom *Mother) removeInvitation(slackID string) {
 
 func (mom *Mother) getMessageLink(timestamp string) string {
 	link, err := mom.rtm.GetPermalink(
-		&slack.PermalinkParameters{
-			Channel: mom.config.ChanID,
-			Ts:      timestamp,
-		},
+		&slack.PermalinkParameters{Channel: mom.config.ChanID, Ts: timestamp},
 	)
 	if err != nil {
 		return timestamp
@@ -415,7 +414,7 @@ func (mom *Mother) spoofAvailability(dummyChanID *string) {
 	mom.rtm.SendMessage(mom.rtm.NewTypingMessage(*dummyChanID))
 }
 
-func (mom *Mother) translateSlackIDs(msg string) string {
+func (mom *Mother) subDisplayNames(msg string) string {
 	rgx := regexp.MustCompile("<@(.*?)>")
 	for {
 		res := rgx.FindStringSubmatch(msg)

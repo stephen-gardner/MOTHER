@@ -19,41 +19,43 @@ type (
 	}
 )
 
+// Handles messages sent to the member channel
 func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack.User) {
 	var conv *Conversation
 	if ev.ThreadTimestamp != "" {
 		conv = mom.findConversationByTimestamp(ev.ThreadTimestamp, true)
 	}
-	if conv != nil {
-		msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
-		directTimestamp, err := conv.postMessageToDM(msg)
-		if err != nil {
-			return
-		}
-		entry := &MessageLog{
-			SlackID:         ev.User,
-			Msg:             ev.Text,
-			DirectTimestamp: directTimestamp,
-			ConvTimestamp:   ev.Timestamp,
-			Original:        true,
-		}
-		conv.addLog(entry)
-
-		for _, attach := range ev.Files {
-			if attach.URLPrivateDownload == "" {
-				continue
-			}
-			if err := conv.mirrorAttachment(attach, entry, false); err != nil {
-				mom.log.Println(err)
-			}
+	if conv == nil {
+		if ev.Text != "" && ev.Text[0] == '!' {
+			mom.runCommand(ev, sender, true)
 		}
 		return
 	}
-	if ev.Text != "" && ev.Text[0] == '!' {
-		mom.runCommand(ev, sender, true)
+	msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
+	directTimestamp, err := conv.postMessageToDM(msg)
+	if err != nil {
+		mom.log.Println(err)
+		return
+	}
+	entry := &MessageLog{
+		SlackID:         ev.User,
+		Msg:             ev.Text,
+		DirectTimestamp: directTimestamp,
+		ConvTimestamp:   ev.Timestamp,
+		Original:        true,
+	}
+	conv.addLog(entry)
+	for _, attach := range ev.Files {
+		if attach.URLPrivateDownload == "" {
+			continue
+		}
+		if err := conv.mirrorAttachment(attach, entry, false); err != nil {
+			mom.log.Println(err)
+		}
 	}
 }
 
+// Handles messages sent directly to the bot
 func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack.User, chanInfo *slack.Channel) {
 	hasMember := false
 	// Cannot do anything with blacklisted user present
@@ -77,12 +79,12 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 		memberChanInfo, err := mom.getChannelInfo(mom.config.ChanID)
 		if err != nil {
 			mom.log.Println(err)
+			return
 		}
 		msg := fmt.Sprintf(mom.getMsg("inConvChannel"), memberChanInfo.Name)
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 		return
 	}
-
 	var convTimestamp string
 	var err error
 	conv := mom.findConversationByChannel(ev.Channel)
@@ -98,6 +100,7 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 	}
 	msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
 	if convTimestamp, err = conv.postMessageToThread(msg); err != nil {
+		mom.log.Println(err)
 		return
 	}
 	entry := &MessageLog{
@@ -108,7 +111,6 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 		Original:        true,
 	}
 	conv.addLog(entry)
-
 	for _, attach := range ev.Files {
 		if attach.URLPrivateDownload == "" {
 			continue
@@ -190,8 +192,8 @@ func handleMemberJoinedChannelEvent(mom *Mother, ev *slack.MemberJoinedChannelEv
 		return
 	}
 	// Prevent users from being accidentally invited to the member channel; requires admin privileges
-	if userInfo, err := mom.getUserInfo(mom.rtm.GetInfo().User.ID); err == nil {
-		if userInfo.IsAdmin {
+	if botInfo, err := mom.getUserInfo(mom.rtm.GetInfo().User.ID); err == nil {
+		if botInfo.IsAdmin {
 			if !mom.isInvited(ev.User) {
 				if err := mom.rtm.KickUserFromConversation(ev.Channel, ev.User); err != nil {
 					mom.log.Println(err)
@@ -267,7 +269,7 @@ func handleReactionRemovedEvent(mom *Mother, ev *slack.ReactionRemovedEvent) {
 
 // Forward typing events from direct messages to member channel
 func handleUserTypingEvent(mom *Mother, ev *slack.UserTypingEvent) {
-	if mom.hasMember(ev.User) || mom.isBlacklisted(ev.User) {
+	if ev.Channel == mom.config.ChanID || mom.hasMember(ev.User) || mom.isBlacklisted(ev.User) {
 		return
 	}
 	chanInfo, err := mom.getChannelInfo(ev.Channel)

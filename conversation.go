@@ -35,7 +35,7 @@ type (
 )
 
 func (conv *Conversation) addLog(entry *MessageLog) {
-	entry.Msg = conv.mom.translateSlackIDs(entry.Msg)
+	entry.Msg = conv.mom.subDisplayNames(entry.Msg)
 	err := db.
 		Model(conv).
 		Association("MessageLogs").
@@ -221,10 +221,8 @@ func (conv *Conversation) abandon() {
 			continue
 		}
 		conv.mom.Conversations = append(conv.mom.Conversations[:i], conv.mom.Conversations[i+1:]...)
-		if conv.Active {
-			if err := conv.setActive(false); err != nil {
-				conv.mom.log.Println(err)
-			}
+		if err := conv.setActive(false); err != nil {
+			conv.mom.log.Println(err)
 		}
 		break
 	}
