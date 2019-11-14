@@ -391,7 +391,7 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent, sender *slack.User, forceT
 	)
 	if success {
 		reaction = mom.getMsg("reactSuccess")
-		mom.log.Printf("<%s> %s\n", sender.Profile.DisplayName, ev.Text)
+		mom.log.Printf("<%s> %s\n", sender.Profile.DisplayName, mom.subDisplayNames(ev.Text))
 	} else {
 		reaction = mom.getMsg("reactFailure")
 	}
