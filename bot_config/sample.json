@@ -19,7 +19,7 @@
     "cmdHelpHelp": ">`help` `[command]` - Display command help",
     "cmdHelpHistory": ">`history` `thread_id/@user...` `[page #]` - List recent conversations",
     "cmdHelpInvite": ">`invite` `@user...` - Invites users to channel",
-    "cmdHelpLogs": ">`logs` `thread_id/@user...` - Upload logs for given users or thread",
+    "cmdHelpLogs": ">`logs` `[-m]` `thread_id/@user...` - Upload logs for given users or thread",
     "cmdHelpResume": ">`resume` `thread_id/@user...` - Resume conversation under a new thread",
     "cmdHistory": "*Recent threads _(page %d):_*",
     "cmdHistoryElement": ">*%s* (%s) _%s_",

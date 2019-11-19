@@ -325,10 +325,73 @@ func cmdInvite(mom *Mother, params cmdParams) bool {
 	return err == nil
 }
 
+// Writes MessageLog slice to buffer
+func writeLogs(mom *Mother, buff *bytes.Buffer, logs []MessageLog) error {
+	for _, msg := range logs {
+		if msg.Msg != "" {
+			userInfo, err := mom.getUserInfo(msg.SlackID)
+			if err != nil {
+				return err
+			}
+			var format string
+			epoch, _ := strconv.ParseInt(strings.Split(msg.ConvTimestamp, ".")[0], 10, 64)
+			timestamp := time.Unix(epoch, 0).String()
+			if msg.Original {
+				format = mom.getMsg("cmdLogsMsg")
+			} else {
+				format = mom.getMsg("cmdLogsMsgEdited")
+			}
+			buff.WriteString(fmt.Sprintf(format, timestamp, userInfo.Profile.DisplayName, msg.Msg))
+		}
+	}
+	return nil
+}
+
+// Builds default !logs output, with logs sorted chronologically into blocks by session
+func buildLogsOutput(mom *Mother, buff *bytes.Buffer, convos []Conversation) error {
+	first := true
+	for _, conv := range convos {
+		if !first {
+			buff.WriteRune('\n')
+		} else {
+			first = false
+		}
+		buff.WriteString(fmt.Sprintf(mom.getMsg("cmdLogsThread"), conv.ThreadID))
+		if err := writeLogs(mom, buff, conv.MessageLogs); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Builds !logs output with logs sorted chronologically
+func buildMergedLogsOutput(mom *Mother, buff *bytes.Buffer, convos []Conversation) error {
+	var logs []MessageLog
+	for _, conv := range convos {
+		logs = append(logs, conv.MessageLogs...)
+	}
+	sort.Slice(logs, func(i, j int) bool {
+		return logs[i].CreatedAt.Sub(logs[j].CreatedAt) < 0
+	})
+	if err := writeLogs(mom, buff, logs); err != nil {
+		return err
+	}
+	return nil
+}
+
 // Upload conversation logs for specified threadID/users
 func cmdLogs(mom *Mother, params cmdParams) bool {
 	if len(params.args) == 0 {
 		return false
+	}
+	// Flag whether or not log output is merged
+	merged := false
+	if params.args[0] == "-m" {
+		if len(params.args) < 2 {
+			return false
+		}
+		merged = true
+		params.args = params.args[1:]
 	}
 	var convos []Conversation
 	var err error
@@ -360,32 +423,14 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 		return false
 	}
 	buff := &bytes.Buffer{}
-	first := true
-	for _, conv := range convos {
-		if !first {
-			buff.WriteRune('\n')
-		} else {
-			first = false
-		}
-		buff.WriteString(fmt.Sprintf(mom.getMsg("cmdLogsThread"), conv.ThreadID))
-		for _, msg := range conv.MessageLogs {
-			if msg.Msg != "" {
-				userInfo, err := mom.getUserInfo(msg.SlackID)
-				if err != nil {
-					mom.log.Println(err)
-					return false
-				}
-				var format string
-				epoch, _ := strconv.ParseInt(strings.Split(msg.ConvTimestamp, ".")[0], 10, 64)
-				timestamp := time.Unix(epoch, 0).String()
-				if msg.Original {
-					format = mom.getMsg("cmdLogsMsg")
-				} else {
-					format = mom.getMsg("cmdLogsMsgEdited")
-				}
-				buff.WriteString(fmt.Sprintf(format, timestamp, userInfo.Profile.DisplayName, msg.Msg))
-			}
-		}
+	if merged {
+		err = buildMergedLogsOutput(mom, buff, convos)
+	} else {
+		err = buildLogsOutput(mom, buff, convos)
+	}
+	if err != nil {
+		mom.log.Println(err)
+		return false
 	}
 	if buff.Len() == 0 {
 		msg := mom.getMsg("cmdLogsNoRecords")
