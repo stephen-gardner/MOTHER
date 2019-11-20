@@ -95,6 +95,9 @@ func (ctx *convInitContext) loadConversation(threadID string) *convInitContext {
 }
 
 func findPreviousConv(ctx *convInitContext) {
+	if ctx.err != nil {
+		return
+	}
 	for _, prev := range ctx.mom.Conversations {
 		if prev.Active && prev.DirectID == ctx.conv.DirectID {
 			ctx.prev = &prev
@@ -165,24 +168,17 @@ func switchContext(ctx *convInitContext) {
 }
 
 func (ctx *convInitContext) create() (*Conversation, error) {
-	if ctx.err == nil {
-		findPreviousConv(ctx)
+	if findPreviousConv(ctx); ctx.err == nil {
+		ctx.err = db.
+			Model(ctx.mom).
+			Association("Conversations").
+			Append(ctx.conv).Error
 	}
 	if ctx.err != nil {
 		if ctx.newThread {
 			ctx.conv.abandon()
 		}
 		return nil, ctx.err
-	}
-	err := db.
-		Model(ctx.mom).
-		Association("Conversations").
-		Append(ctx.conv).Error
-	if err != nil {
-		if ctx.newThread {
-			ctx.conv.abandon()
-		}
-		return nil, err
 	}
 	if ctx.newThread {
 		newThreadNotice(ctx)

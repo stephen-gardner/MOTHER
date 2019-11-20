@@ -373,10 +373,7 @@ func buildMergedLogsOutput(mom *Mother, buff *bytes.Buffer, convos []Conversatio
 	sort.Slice(logs, func(i, j int) bool {
 		return logs[i].CreatedAt.Sub(logs[j].CreatedAt) < 0
 	})
-	if err := writeLogs(mom, buff, logs); err != nil {
-		return err
-	}
-	return nil
+	return writeLogs(mom, buff, logs)
 }
 
 // Upload conversation logs for specified threadID/users
