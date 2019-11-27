@@ -341,7 +341,11 @@ func writeLogs(mom *Mother, buff *bytes.Buffer, logs []MessageLog) error {
 			} else {
 				format = mom.getMsg("cmdLogsMsgEdited")
 			}
-			buff.WriteString(fmt.Sprintf(format, timestamp, userInfo.Profile.DisplayName, msg.Msg))
+			displayName := userInfo.Profile.DisplayName
+			if displayName == "" {
+				displayName = userInfo.Name
+			}
+			buff.WriteString(fmt.Sprintf(format, timestamp, displayName, msg.Msg))
 		}
 	}
 	return nil
@@ -528,6 +532,8 @@ func cmdReload(mom *Mother, _ cmdParams) bool {
 		return false
 	}
 	go func(mom *Mother, configFile os.FileInfo) {
+		// Give a second for emoji response to send
+		time.Sleep(time.Second)
 		mom.reload = true
 		mom.rtm.Disconnect()
 		// Wait for bot to fully disconnect

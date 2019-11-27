@@ -26,7 +26,7 @@ func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slac
 		conv = mom.findConversationByTimestamp(ev.ThreadTimestamp, true)
 	}
 	if conv == nil {
-		if ev.Text != "" && ev.Text[0] == '!' {
+		if mom.config.AllowCommandsInChannel && ev.Text != "" && ev.Text[0] == '!' {
 			mom.runCommand(ev, sender, true)
 		}
 		return

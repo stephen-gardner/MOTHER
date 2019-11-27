@@ -14,14 +14,15 @@ import (
 )
 
 type botConfig struct {
-	Token                string
-	ChanID               string
-	Enabled              bool
-	MaxFileSize          int
-	SessionTimeout       int64
-	TimeoutCheckInterval int64
-	ThreadsPerPage       int
-	Lang                 map[string]string
+	Token                  string
+	ChanID                 string
+	Enabled                bool
+	AllowCommandsInChannel bool
+	MaxFileSize            int
+	SessionTimeout         int64
+	TimeoutCheckInterval   int64
+	ThreadsPerPage         int
+	Lang                   map[string]string
 }
 
 var mothers = sync.Map{}

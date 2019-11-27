@@ -426,7 +426,11 @@ func (mom *Mother) subDisplayNames(msg string) string {
 			mom.log.Println(err)
 			break
 		}
-		translated := fmt.Sprintf("@%s[%s]", user.Profile.DisplayName, res[1])
+		displayName := user.Profile.DisplayName
+		if displayName == "" {
+			displayName = user.Name
+		}
+		translated := fmt.Sprintf("@%s[%s]", displayName, res[1])
 		msg = strings.ReplaceAll(msg, res[0], translated)
 	}
 	return msg
