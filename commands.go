@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -258,17 +259,22 @@ func cmdHistory(mom *Mother, params cmdParams) bool {
 	}
 	var convos []Conversation
 	var err error
+	var totalRecords uint
 	if len(slackIDs) > 0 {
 		err = db.
+			Model(&Conversation{}).
 			Where("mother_id = ? AND slack_ids = ?", mom.ID, strings.Join(slackIDs, ",")).
 			Order("updated_at desc, id desc").
+			Count(&totalRecords).
 			Limit(mom.config.ThreadsPerPage).
 			Offset(mom.config.ThreadsPerPage * (page - 1)).
 			Find(&convos).Error
 	} else {
 		err = db.
+			Model(&Conversation{}).
 			Where("mother_id = ?", mom.ID, ).
 			Order("updated_at desc, id desc").
+			Count(&totalRecords).
 			Limit(mom.config.ThreadsPerPage).
 			Offset(mom.config.ThreadsPerPage * (page - 1)).
 			Find(&convos).Error
@@ -278,7 +284,8 @@ func cmdHistory(mom *Mother, params cmdParams) bool {
 		return false
 	}
 	threads := make([]string, len(convos)+1)
-	threads[0] = fmt.Sprintf(mom.getMsg("cmdHistory"), page)
+	totalPages := math.Ceil(float64(totalRecords) / float64(mom.config.ThreadsPerPage))
+	threads[0] = fmt.Sprintf(mom.getMsg("cmdHistory"), page, int(totalPages))
 	i := 1
 	for _, conv := range convos {
 		tagged := strings.Split(conv.SlackIDs, ",")
