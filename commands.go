@@ -55,7 +55,7 @@ func getSlackID(tagged string) string {
 // Lists currently active conversations
 func cmdActive(mom *Mother, params cmdParams) bool {
 	active := make([]string, len(mom.Conversations)+1)
-	active[0] = mom.getMsg("cmdActive")
+	active[0] = mom.getMsg("cmdActive", nil)
 	i := 1
 	for _, conv := range mom.Conversations {
 		if !conv.Active {
@@ -68,17 +68,16 @@ func cmdActive(mom *Mother, params cmdParams) bool {
 		// Get how much time is left before conversation expires
 		timeout := time.Duration(mom.config.SessionTimeout) * time.Second
 		timeout -= time.Now().Sub(conv.UpdatedAt)
-		active[i] = fmt.Sprintf(
-			mom.getMsg("cmdActiveElement"),
-			mom.getMessageLink(conv.ThreadID),
-			strings.Join(tagged, ", "),
-			timeout.Round(time.Second),
-		)
+		active[i] = mom.getMsg("cmdActiveElement", []langVar{
+			{"THREAD_LINK", mom.getMessageLink(conv.ThreadID)},
+			{"USER_LIST", strings.Join(tagged, ", ")},
+			{"TIME_UNTIL_EXPIRED", timeout.Round(time.Second).String()},
+		})
 		i++
 	}
 	active = active[:i]
 	if len(active) == 1 {
-		active = append(active, mom.getMsg("listNone"))
+		active = append(active, mom.getMsg("listNone", nil))
 	}
 	msg := strings.Join(active, "\n")
 	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
@@ -94,7 +93,7 @@ func cmdBlacklist(mom *Mother, params cmdParams) bool {
 		}
 		// It won't be alphabetical, but at least keeps the list order consistent
 		sort.Strings(tagged)
-		msg := mom.getMsg("cmdBlacklist") + strings.Join(tagged, ", ")
+		msg := mom.getMsg("cmdBlacklist", nil) + strings.Join(tagged, ", ")
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
@@ -218,19 +217,19 @@ func cmdHelp(mom *Mother, params cmdParams) bool {
 		help := make([]string, 0)
 		for cmd := range commands {
 			key := "cmdHelp" + strings.ToUpper(cmd[0:1]) + cmd[1:]
-			if lang := mom.getMsg(key); lang != "" {
+			if lang := mom.getMsg(key, nil); lang != "" {
 				help = append(help, lang)
 			}
 		}
 		sort.Strings(help)
-		msg = mom.getMsg("cmdHelp") + strings.Join(help, "\n")
+		msg = mom.getMsg("cmdHelp", nil) + strings.Join(help, "\n")
 	} else {
 		cmd := params.args[0]
 		if _, present := commands[cmd]; !present {
 			return false
 		}
 		key := "cmdHelp" + strings.ToUpper(cmd[0:1]) + cmd[1:]
-		msg = mom.getMsg(key) + "\n"
+		msg = mom.getMsg(key, nil) + "\n"
 	}
 	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 	return true
@@ -285,26 +284,28 @@ func cmdHistory(mom *Mother, params cmdParams) bool {
 	}
 	threads := make([]string, len(convos)+1)
 	totalPages := math.Ceil(float64(totalRecords) / float64(mom.config.ThreadsPerPage))
-	threads[0] = fmt.Sprintf(mom.getMsg("cmdHistory"), page, int(totalPages))
+	threads[0] = mom.getMsg("cmdHistory", []langVar{
+		{"CURRENT_PAGE", strconv.Itoa(page)},
+		{"TOTAL_PAGES", strconv.Itoa(int(totalPages))},
+	})
 	i := 1
 	for _, conv := range convos {
 		tagged := strings.Split(conv.SlackIDs, ",")
 		for i, ID := range tagged {
 			tagged[i] = fmt.Sprintf("<@%s>", ID)
 		}
-		threads[i] = fmt.Sprintf(
-			mom.getMsg("cmdHistoryElement"),
-			mom.getMessageLink(conv.ThreadID),
-			strings.Join(tagged, ", "),
-			conv.UpdatedAt,
-		)
+		threads[i] = mom.getMsg("cmdHistoryElement", []langVar{
+			{"THREAD_LINK", mom.getMessageLink(conv.ThreadID)},
+			{"USER_LIST", strings.Join(tagged, ", ")},
+			{"LAST_UPDATED", conv.UpdatedAt.String()},
+		})
 		i++
 	}
 	if len(convos) == 0 {
 		if page > 1 {
 			return false
 		}
-		threads = append(threads, mom.getMsg("listNone"))
+		threads = append(threads, mom.getMsg("listNone", nil))
 	}
 	msg := strings.Join(threads, "\n")
 	mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
@@ -341,18 +342,21 @@ func writeLogs(mom *Mother, buff *bytes.Buffer, logs []MessageLog) error {
 				return err
 			}
 			var format string
-			epoch, _ := strconv.ParseInt(strings.Split(msg.ConvTimestamp, ".")[0], 10, 64)
-			timestamp := time.Unix(epoch, 0).String()
 			if msg.Original {
-				format = mom.getMsg("cmdLogsMsg")
+				format = "cmdLogsMsg"
 			} else {
-				format = mom.getMsg("cmdLogsMsgEdited")
+				format = "cmdLogsMsgEdited"
 			}
+			epoch, _ := strconv.ParseInt(strings.Split(msg.ConvTimestamp, ".")[0], 10, 64)
 			displayName := userInfo.Profile.DisplayName
 			if displayName == "" {
 				displayName = userInfo.Name
 			}
-			buff.WriteString(fmt.Sprintf(format, timestamp, displayName, msg.Msg))
+			buff.WriteString(mom.getMsg(format, []langVar{
+				{"TIMESTAMP", time.Unix(epoch, 0).String()},
+				{"DISPLAY_NAME", displayName},
+				{"MESSAGE", msg.Msg},
+			}))
 		}
 	}
 	return nil
@@ -367,7 +371,9 @@ func buildLogsOutput(mom *Mother, buff *bytes.Buffer, convos []Conversation) err
 		} else {
 			first = false
 		}
-		buff.WriteString(fmt.Sprintf(mom.getMsg("cmdLogsThread"), conv.ThreadID))
+		buff.WriteString(mom.getMsg("cmdLogsThread", []langVar{
+			{"THREAD_ID", conv.ThreadID},
+		}))
 		if err := writeLogs(mom, buff, conv.MessageLogs); err != nil {
 			return err
 		}
@@ -441,7 +447,7 @@ func cmdLogs(mom *Mother, params cmdParams) bool {
 		return false
 	}
 	if buff.Len() == 0 {
-		msg := mom.getMsg("cmdLogsNoRecords")
+		msg := mom.getMsg("cmdLogsNoRecords", nil)
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, params.chanID, slack.RTMsgOptionTS(params.threadID)))
 		return true
 	}
@@ -576,25 +582,28 @@ func cmdUnload(mom *Mother, params cmdParams) bool {
 
 // Display information about how long each bot has been active
 func cmdUptime(mom *Mother, params cmdParams) bool {
-	uptime := []string{mom.getMsg("cmdUptime")}
+	uptime := []string{mom.getMsg("cmdUptime", nil)}
 	mothers.Range(func(key, value interface{}) bool {
 		name := key.(string)
 		bot := value.(*Mother)
-		msg := ""
 		// Can't tag bots located in different workspaces
+		var format string
 		if mom.rtm.GetInfo().Team.ID == bot.rtm.GetInfo().Team.ID {
-			msg = mom.getMsg("cmdUptimeElement")
+			format = "cmdUptimeElement"
 		} else {
-			msg = mom.getMsg("cmdUptimeForeignElement")
+			format = "cmdUptimeForeignElement"
 		}
 		var duration string
 		if bot.isOnline() {
 			duration = time.Now().Sub(bot.connectedAt).Round(time.Second).String()
 		} else {
-			duration = mom.getMsg("cmdUptimeOffline")
+			duration = mom.getMsg("cmdUptimeOffline", nil)
 		}
-		info := fmt.Sprintf(msg, name, bot.rtm.GetInfo().User.ID, duration)
-		uptime = append(uptime, info)
+		uptime = append(uptime, mom.getMsg(format, []langVar{
+			{"BOT_NAME", name},
+			{"BOT_SLACK_ID", bot.rtm.GetInfo().User.ID},
+			{"UPTIME", duration},
+		}))
 		return true
 	})
 	msg := strings.Join(uptime, "\n")

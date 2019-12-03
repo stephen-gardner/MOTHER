@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"sort"
 	"time"
 
@@ -31,7 +30,10 @@ func handleChannelMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slac
 		}
 		return
 	}
-	msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
+	msg := mom.getMsg("msgCopyFmt", []langVar{
+		{"SLACK_ID", ev.User},
+		{"MESSAGE", ev.Text},
+	})
 	directTimestamp, err := conv.postMessageToDM(msg)
 	if err != nil {
 		mom.log.Println(err)
@@ -61,7 +63,9 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 	// Cannot do anything with blacklisted user present
 	for _, userID := range chanInfo.Members {
 		if mom.isBlacklisted(userID) {
-			msg := fmt.Sprintf(mom.getMsg("blacklistedUser"), userID)
+			msg := mom.getMsg("blacklistedUser", []langVar{
+				{"SLACK_ID", userID},
+			})
 			mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 			return
 		}
@@ -81,7 +85,9 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 			mom.log.Println(err)
 			return
 		}
-		msg := fmt.Sprintf(mom.getMsg("inConvChannel"), memberChanInfo.Name)
+		msg := mom.getMsg("inConvChannel", []langVar{
+			{"CHANNEL_NAME", memberChanInfo.Name},
+		})
 		mom.rtm.SendMessage(mom.rtm.NewOutgoingMessage(msg, ev.Channel))
 		return
 	}
@@ -98,7 +104,10 @@ func handleDirectMessageEvent(mom *Mother, ev *slack.MessageEvent, sender *slack
 			return
 		}
 	}
-	msg := fmt.Sprintf(mom.getMsg("msgCopyFmt"), ev.User, ev.Text)
+	msg := mom.getMsg("msgCopyFmt", []langVar{
+		{"SLACK_ID", ev.User},
+		{"MESSAGE", ev.Text},
+	})
 	if convTimestamp, err = conv.postMessageToThread(msg); err != nil {
 		mom.log.Println(err)
 		return

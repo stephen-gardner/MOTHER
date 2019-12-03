@@ -2,7 +2,7 @@ package main
 
 import (
 	"bytes"
-	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/jinzhu/gorm"
@@ -85,7 +85,10 @@ func (conv *Conversation) mirrorAttachment(file slack.File, msgEntry *MessageLog
 	buff := &bytes.Buffer{}
 	threadTimestamp := ""
 	if file.Size > conv.mom.config.MaxFileSize {
-		msg := fmt.Sprintf(conv.mom.getMsg("fileTooLarge"), file.Name, conv.mom.config.MaxFileSize)
+		msg := conv.mom.getMsg("fileTooLarge", []langVar{
+			{"FILE_NAME", file.Name},
+			{"MAX_FILE_SIZE", strconv.Itoa(conv.mom.config.MaxFileSize)},
+		})
 		conv.sendMessageToDM(msg)
 		conv.sendMessageToThread(msg)
 		return nil
@@ -119,9 +122,12 @@ func (conv *Conversation) mirrorAttachment(file slack.File, msgEntry *MessageLog
 	} else {
 		fileURL = file.URLPrivate
 	}
+	msg := conv.mom.getMsg("uploadedFile", []langVar{
+		{"FILE_URL", fileURL},
+	})
 	entry := &MessageLog{
 		SlackID:         file.User,
-		Msg:             fmt.Sprintf(conv.mom.getMsg("uploadedFile"), fileURL),
+		Msg:             msg,
 		DirectTimestamp: msgEntry.DirectTimestamp + "a",
 		ConvTimestamp:   msgEntry.ConvTimestamp + "a",
 		Original:        true,
@@ -149,11 +155,13 @@ func (conv *Conversation) mirrorEdit(slackID, timestamp, msg string, isDirect bo
 		mirrorTimestamp = directTimestamp
 		chanID = conv.DirectID
 	}
-	tagged := fmt.Sprintf(conv.mom.getMsg("msgCopyFmt"), slackID, msg)
 	_, _, _, err := conv.mom.rtm.UpdateMessage(
 		chanID,
 		mirrorTimestamp,
-		slack.MsgOptionText(tagged, false),
+		slack.MsgOptionText(conv.mom.getMsg("msgCopyFmt", []langVar{
+			{"SLACK_ID", slackID},
+			{"MESSAGE", msg},
+		}), false),
 	)
 	if err != nil {
 		conv.mom.log.Println(err)
@@ -238,8 +246,10 @@ func (conv *Conversation) expire() {
 	if err := conv.setActive(false); err != nil {
 		conv.mom.log.Println(err)
 	}
-	conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect"))
-	conv.sendMessageToThread(fmt.Sprintf(conv.mom.getMsg("sessionExpiredConv"), conv.ThreadID))
+	conv.sendMessageToDM(conv.mom.getMsg("sessionExpiredDirect", nil))
+	conv.sendMessageToThread(conv.mom.getMsg("sessionExpiredConv", []langVar{
+		{"THREAD_ID", conv.ThreadID},
+	}))
 }
 
 func (conv *Conversation) update() {

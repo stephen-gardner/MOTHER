@@ -41,6 +41,11 @@ type (
 		data      interface{}
 		updatedAt time.Time
 	}
+
+	langVar struct {
+		key   string
+		value string
+	}
 )
 
 func getMother(botName string, config botConfig) (*Mother, error) {
@@ -370,7 +375,7 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent, sender *slack.User, forceT
 	ref := slack.NewRefToMessage(ev.Channel, ev.Timestamp)
 	cmd, present := commands[cmdName]
 	if !present {
-		if err := mom.rtm.AddReaction(mom.getMsg("reactUnknown"), ref); err != nil {
+		if err := mom.rtm.AddReaction(mom.getMsg("reactUnknown", nil), ref); err != nil {
 			mom.log.Println(err)
 		}
 		return
@@ -390,10 +395,10 @@ func (mom *Mother) runCommand(ev *slack.MessageEvent, sender *slack.User, forceT
 		},
 	)
 	if success {
-		reaction = mom.getMsg("reactSuccess")
+		reaction = mom.getMsg("reactSuccess", nil)
 		mom.log.Printf("<%s> %s\n", sender.Profile.DisplayName, mom.subDisplayNames(ev.Text))
 	} else {
-		reaction = mom.getMsg("reactFailure")
+		reaction = mom.getMsg("reactFailure", nil)
 	}
 	if err := mom.rtm.AddReaction(reaction, ref); err != nil {
 		mom.log.Println(err)
@@ -436,6 +441,12 @@ func (mom *Mother) subDisplayNames(msg string) string {
 	return msg
 }
 
-func (mom *Mother) getMsg(key string) string {
-	return mom.config.Lang[key]
+func (mom *Mother) getMsg(key string, vars []langVar) string {
+	str := mom.config.Lang[key]
+	if vars != nil {
+		for _, subst := range vars {
+			str = strings.ReplaceAll(str, "%"+subst.key+"%", subst.value)
+		}
+	}
+	return str
 }

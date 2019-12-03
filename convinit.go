@@ -44,7 +44,9 @@ func (ctx *convInitContext) postNewThread(directID string, slackIDs []string) *c
 	for _, ID := range slackIDs {
 		tagged = append(tagged, fmt.Sprintf("<@%s>", ID))
 	}
-	parent := fmt.Sprintf(ctx.mom.getMsg("sessionNotice"), strings.Join(tagged, ", "))
+	parent := ctx.mom.getMsg("sessionNotice", []langVar{
+		{"USERS", strings.Join(tagged, ", ")},
+	})
 	threadID, err := ctx.mom.postMessage(ctx.mom.config.ChanID, "", parent)
 	if err != nil {
 		ctx.err = err
@@ -120,12 +122,15 @@ func findPreviousConv(ctx *convInitContext) {
 }
 
 func newThreadNotice(ctx *convInitContext) {
-	ctx.msg = append(ctx.msg, fmt.Sprintf(ctx.mom.getMsg("sessionStartConv"), ctx.conv.ThreadID))
+	ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionStartConv", []langVar{
+		{"THREAD_ID", ctx.conv.ThreadID},
+	}))
 	if !ctx.resumed && !ctx.switched {
-		ctx.conv.sendMessageToDM(ctx.mom.getMsg("sessionStartDirect"))
+		ctx.conv.sendMessageToDM(ctx.mom.getMsg("sessionStartDirect", nil))
 		if ctx.prev != nil {
-			link := ctx.mom.getMessageLink(ctx.prev.ThreadID)
-			ctx.msg = append(ctx.msg, fmt.Sprintf(ctx.mom.getMsg("sessionStartPrev"), link))
+			ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionStartPrev", []langVar{
+				{"THREAD_LINK", ctx.mom.getMessageLink(ctx.prev.ThreadID)},
+			}))
 		}
 	}
 }
@@ -133,16 +138,18 @@ func newThreadNotice(ctx *convInitContext) {
 func resumeNotice(ctx *convInitContext) {
 	if ctx.newThread {
 		// For conversations resumed with a command
-		link := ctx.mom.getMessageLink(ctx.conv.ThreadID)
-		ctx.prev.sendMessageToThread(fmt.Sprintf(ctx.mom.getMsg("sessionResumeTo"), link))
-		link = ctx.mom.getMessageLink(ctx.prev.ThreadID)
-		ctx.msg = append(ctx.msg, fmt.Sprintf(ctx.mom.getMsg("sessionResumeFrom"), link))
+		ctx.prev.sendMessageToThread(ctx.mom.getMsg("sessionResumeTo", []langVar{
+			{"THREAD_LINK", ctx.mom.getMessageLink(ctx.conv.ThreadID)},
+		}))
+		ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionResumeFrom", []langVar{
+			{"THREAD_LINK", ctx.mom.getMessageLink(ctx.prev.ThreadID)},
+		}))
 	}
 	if !ctx.switched {
-		ctx.conv.sendMessageToDM(ctx.mom.getMsg("sessionResumeDirect"))
+		ctx.conv.sendMessageToDM(ctx.mom.getMsg("sessionResumeDirect", nil))
 		// For conversations resumed with a message
 		if !ctx.newThread {
-			ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionResumeConv"))
+			ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionResumeConv", nil))
 		}
 	}
 }
@@ -160,10 +167,12 @@ func switchContext(ctx *convInitContext) {
 		break
 	}
 	if (ctx.resumed && !ctx.newThread) || !ctx.resumed {
-		link := ctx.mom.getMessageLink(ctx.conv.ThreadID)
-		ctx.prev.sendMessageToThread(fmt.Sprintf(ctx.mom.getMsg("sessionContextSwitchedTo"), link))
-		link = ctx.mom.getMessageLink(ctx.prev.ThreadID)
-		ctx.msg = append(ctx.msg, fmt.Sprintf(ctx.mom.getMsg("sessionContextSwitchedFrom"), link))
+		ctx.prev.sendMessageToThread(ctx.mom.getMsg("sessionContextSwitchedTo", []langVar{
+			{"THREAD_LINK", ctx.mom.getMessageLink(ctx.conv.ThreadID)},
+		}))
+		ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionContextSwitchedFrom", []langVar{
+			{"THREAD_LINK", ctx.mom.getMessageLink(ctx.prev.ThreadID)},
+		}))
 	}
 }
 
