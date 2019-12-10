@@ -131,6 +131,9 @@ func newThreadNotice(ctx *convInitContext) {
 			ctx.msg = append(ctx.msg, ctx.mom.getMsg("sessionStartPrev", []langVar{
 				{"THREAD_LINK", ctx.mom.getMessageLink(ctx.prev.ThreadID)},
 			}))
+			ctx.prev.sendMessageToThread(ctx.mom.getMsg("sessionStartNext", []langVar{
+				{"THREAD_LINK", ctx.mom.getMessageLink(ctx.conv.ThreadID)},
+			}))
 		}
 	}
 }

@@ -50,6 +50,7 @@
     "sessionResumeTo": ">_*Session resumed at [%THREAD_LINK%].*_",
     "sessionStartConv": ">_*Session [%THREAD_ID%] started.*_",
     "sessionStartDirect": ">_*A dialogue has been started with the RA team. An RA will reach out to you shortly.*_",
+    "sessionStartNext": ">_*Next session is [%THREAD_LINK%].*_",
     "sessionStartPrev": ">_*Previous session is [%THREAD_LINK%].*_",
     "uploadedFile": "Uploaded a file (%FILE_URL%)"
   }
