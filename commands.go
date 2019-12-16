@@ -505,6 +505,7 @@ func cmdResume(mom *Mother, params cmdParams) bool {
 	}
 	_, err := mom.
 		newConversation().
+		fromCommand(params.userID).
 		loadConversation(conv.ThreadID).
 		postNewThread("", nil).
 		create()
