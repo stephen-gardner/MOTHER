@@ -15,6 +15,7 @@ type convInitContext struct {
 	conv      *Conversation
 	prev      *Conversation
 	msg       []string
+	initiator string
 	newThread bool
 	resumed   bool
 	switched  bool
@@ -44,10 +45,20 @@ func (ctx *convInitContext) postNewThread(directID string, slackIDs []string) *c
 	for _, ID := range slackIDs {
 		tagged = append(tagged, fmt.Sprintf("<@%s>", ID))
 	}
-	parent := ctx.mom.getMsg("sessionNotice", []langVar{
-		{"USERS", strings.Join(tagged, ", ")},
-	})
-	threadID, err := ctx.mom.postMessage(ctx.mom.config.ChanID, "", parent)
+	var threadID string
+	var err error
+	if ctx.initiator != "" {
+		parent := ctx.mom.getMsg("sessionNoticeCmd", []langVar{
+			{"INITIATOR", ctx.initiator},
+			{"USERS", strings.Join(tagged, ", ")},
+		})
+		threadID, err = ctx.mom.postMessage(ctx.mom.config.ChanID, "", parent)
+	} else {
+		parent := ctx.mom.getMsg("sessionNotice", []langVar{
+			{"USERS", strings.Join(tagged, ", ")},
+		})
+		threadID, err = ctx.mom.postMessage(ctx.mom.config.ChanID, "", parent)
+	}
 	if err != nil {
 		ctx.err = err
 		return ctx
@@ -93,6 +104,11 @@ func (ctx *convInitContext) loadConversation(threadID string) *convInitContext {
 	conv.init(ctx.mom)
 	conv.update()
 	ctx.resumed = true
+	return ctx
+}
+
+func (ctx *convInitContext) fromCommand(initiator string) *convInitContext {
+	ctx.initiator = initiator
 	return ctx
 }
 

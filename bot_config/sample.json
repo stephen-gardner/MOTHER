@@ -44,6 +44,7 @@
     "sessionExpiredConv": ">_*Session [%THREAD_ID%] has expired.*_\n>Edits/reactions to previous messages will no longer be reflected in communications.",
     "sessionExpiredDirect": ">_*Session has expired.*_\n>If your issue has not yet been resolved, an RA will be contacting you ASAP.\n>Edits/reactions to previous messages will no longer be reflected in communications.",
     "sessionNotice": "_*Conversation started with: %USERS%*_\n_(converse in thread under this message)_",
+    "sessionNoticeCmd": "_*<@%INITIATOR%> started a conversation with: %USERS%*_\n_(converse in thread under this message)_",
     "sessionResumeConv": ">_*Session resumed.*_",
     "sessionResumeDirect": ">_*An RA has resumed your session.*_",
     "sessionResumeFrom": ">_*Session [%THREAD_LINK%] resumed.*_",

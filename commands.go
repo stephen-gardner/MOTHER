@@ -186,6 +186,7 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 	if conv := mom.findConversationByUsers(slackIDs); conv != nil {
 		_, err := mom.
 			newConversation().
+			fromCommand(params.userID).
 			postNewThread(conv.DirectID, slackIDs).
 			create()
 		if err != nil {
@@ -203,6 +204,7 @@ func cmdContact(mom *Mother, params cmdParams) bool {
 	}
 	_, err = mom.
 		newConversation().
+		fromCommand(params.userID).
 		postNewThread(dm.ID, slackIDs).
 		create()
 	if err != nil {
