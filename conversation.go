@@ -22,12 +22,11 @@ type (
 		convIndex   map[string]string `gorm:"-"`
 		directIndex map[string]string `gorm:"-"`
 	}
-
 	MessageLog struct {
 		gorm.Model
 		ConversationID  uint
 		SlackID         string
-		Msg             string
+		Msg             string `gorm:"type:text"`
 		DirectTimestamp string
 		ConvTimestamp   string
 		Original        bool
@@ -180,7 +179,6 @@ func (conv *Conversation) mirrorEdit(slackID, timestamp, msg string, isDirect bo
 
 func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, removed bool) {
 	var targetRef slack.ItemRef
-
 	if isDirect {
 		if _, present := conv.directIndex[timestamp]; !present {
 			return
@@ -192,7 +190,6 @@ func (conv *Conversation) mirrorReaction(timestamp, emoji string, isDirect, remo
 		}
 		targetRef = slack.NewRefToMessage(conv.DirectID, conv.convIndex[timestamp])
 	}
-
 	if removed {
 		_ = conv.mom.rtm.RemoveReaction(emoji, targetRef)
 	} else {
